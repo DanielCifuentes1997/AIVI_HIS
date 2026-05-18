@@ -5,3 +5,6 @@ flake8
 sqlalchemy
 asyncpg
 pydantic-settings
+langgraph
+langchain-google-genai
+langchain-core
