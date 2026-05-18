@@ -1,8 +1,14 @@
 import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, messages_to_dict, messages_from_dict
 from app.application.agent import agent_executor
 from app.infrastructure.redis import redis_client
+
+# Importaciones de infraestructura y dominio para consultar la base de datos
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+from app.infrastructure.database import AsyncSessionLocal
+from app.domain.models import Patient
 
 router = APIRouter()
 
@@ -29,6 +35,14 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+def _extract_text(message_content):
+    """Extrae texto plano de la respuesta de la IA, sin importar su formato original."""
+    if isinstance(message_content, str):
+        return message_content
+    elif isinstance(message_content, list):
+        return " ".join([part.get("text", "") for part in message_content if isinstance(part, dict) and "text" in part])
+    return str(message_content)
+
 @router.websocket("/ws/{patient_id}")
 async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
     await manager.connect(websocket)
@@ -37,30 +51,37 @@ async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
     cached_history = await redis_client.get(redis_key)
     
     if cached_history:
-        history_data = json.loads(cached_history)
-        messages = []
-        for msg in history_data:
-            if msg["role"] == "human":
-                messages.append(HumanMessage(content=msg["content"]))
-            else:
-                messages.append(AIMessage(content=msg["content"]))
+        messages = messages_from_dict(json.loads(cached_history))
         state = {"messages": messages}
         
-        ai_reply = state["messages"][-1].content
+        ai_reply = _extract_text(state["messages"][-1].content)
         await manager.send_state_update(
             websocket=websocket,
             view="interaction",
             data={"text": ai_reply}
         )
     else:
-        initial_prompt = "El paciente acaba de conectarse. Salúdalo, preséntate brevemente y ofrécele las opciones de Citas, Historia Clínica o Medicamentos."
+        # Consultamos el nombre real del paciente usando la sesión asíncrona
+        async with AsyncSessionLocal() as session:
+            stmt = select(Patient).where(Patient.id == patient_id).options(selectinload(Patient.user))
+            result = await session.execute(stmt)
+            patient = result.scalars().first()
+            # Si el paciente o su usuario no tienen nombre, manejamos un fallback genérico
+            patient_name = patient.user.first_name if (patient and patient.user) else "Paciente"
+
+        # Inyectamos el nombre real directamente en las instrucciones iniciales de la IA
+        initial_prompt = (
+            f"El paciente se llama '{patient_name}' y su ID en el sistema es '{patient_id}'. "
+            f"Acaba de conectarse. Salúdalo cordialmente por su nombre de pila, preséntate brevemente "
+            f"como AiVi y ofrécele las opciones de Citas, Historia Clínica o Medicamentos."
+        )
         state = {"messages": [HumanMessage(content=initial_prompt)]}
         
         response = await agent_executor.ainvoke(state)
         state["messages"] = response["messages"]
-        ai_reply = state["messages"][-1].content
+        ai_reply = _extract_text(state["messages"][-1].content)
         
-        history_data = [{"role": "human" if isinstance(m, HumanMessage) else "ai", "content": m.content} for m in state["messages"]]
+        history_data = messages_to_dict(state["messages"])
         await redis_client.set(redis_key, json.dumps(history_data), ex=3600)
         
         await manager.send_state_update(
@@ -79,9 +100,9 @@ async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
                 
                 response = await agent_executor.ainvoke(state)
                 state["messages"] = response["messages"]
-                ai_reply = state["messages"][-1].content
+                ai_reply = _extract_text(state["messages"][-1].content)
                 
-                history_data = [{"role": "human" if isinstance(m, HumanMessage) else "ai", "content": m.content} for m in state["messages"]]
+                history_data = messages_to_dict(state["messages"])
                 await redis_client.set(redis_key, json.dumps(history_data), ex=3600)
                 
                 await manager.send_state_update(

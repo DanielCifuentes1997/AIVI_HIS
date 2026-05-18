@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Prueba Manual AiVi</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 20px auto; padding: 20px; background: #f4f4f9; }
+        #chat { background: white; padding: 20px; height: 300px; overflow-y: scroll; border: 1px solid #ccc; margin-bottom: 10px; }
+        .ia { color: #2563eb; margin-bottom: 10px; }
+        .user { color: #16a34a; margin-bottom: 10px; text-align: right; }
+        input { width: 75%; padding: 10px; }
+        button { width: 20%; padding: 10px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h2>Simulador de WebSocket AiVi</h2>
+    <div id="chat"></div>
+    <input type="text" id="mensaje" placeholder="Habla con Elena..." onkeypress="if(event.key === 'Enter') enviarMensaje()">
+    <button onclick="enviarMensaje()">Enviar</button>
+
+    <script>
+        // Simulamos la conexión con un ID de paciente genérico por ahora
+        const ws = new WebSocket("ws://localhost:8000/ws/5452f5a0-fd32-4f95-8152-7f2e08b48880");
+        const chat = document.getElementById("chat");
+
+        ws.onopen = () => {
+            chat.innerHTML += "<div style='color: gray; text-align: center;'>[Conexión WebSocket Establecida]</div>";
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if(data.type === "STATE_UPDATE") {
+                chat.innerHTML += `<div class="ia"><b>🤖 AiVi (Vista: ${data.payload.view}):</b> ${data.payload.data.text}</div>`;
+                chat.scrollTop = chat.scrollHeight;
+            }
+        };
+
+        function enviarMensaje() {
+            const input = document.getElementById("mensaje");
+            const texto = input.value;
+            if(!texto) return;
+
+            chat.innerHTML += `<div class="user"><b>Tú:</b> ${texto}</div>`;
+            ws.send(JSON.stringify({ type: "USER_ACTION", context: texto }));
+            
+            input.value = "";
+            chat.scrollTop = chat.scrollHeight;
+        }
+    </script>
+</body>
+</html>

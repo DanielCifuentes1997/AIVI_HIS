@@ -4,13 +4,20 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.messages import BaseMessage
-from app.application.tools import get_patient_appointments, get_clinical_summary
+# MODIFICACIÓN: Importamos get_patient_prescriptions junto a las demás herramientas
+from app.application.tools import get_patient_appointments, get_clinical_summary, get_patient_prescriptions
+from app.infrastructure.config import settings
 
 class State(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
-tools = [get_patient_appointments, get_clinical_summary]
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
+tools = [get_patient_appointments, get_clinical_summary, get_patient_prescriptions]
+
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash", 
+    temperature=0, 
+    api_key=settings.GOOGLE_API_KEY
+)
 llm_with_tools = llm.bind_tools(tools)
 
 async def chatbot(state: State):

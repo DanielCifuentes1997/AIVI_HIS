@@ -15,6 +15,11 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     role = Column(String, nullable=False)
+    
+    # Columnas de identidad agregadas con análisis de arquitectura centralizada
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
 
     patient_profile = relationship("Patient", back_populates="user", uselist=False)
 

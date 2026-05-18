@@ -5,8 +5,25 @@ from app.domain.models import User, Patient, ClinicalRecord, Appointment, Prescr
 
 async def seed_data():
     async with AsyncSessionLocal() as session:
-        doc_user = User(email="doctor@aivi.com", hashed_password="hashed_pwd", role="doctor")
-        patient_user = User(email="elena@aivi.com", hashed_password="hashed_pwd", role="patient")
+        # Añadimos los datos de identidad analizados para el Doctor
+        doc_user = User(
+            email="doctor@aivi.com", 
+            hashed_password="hashed_pwd", 
+            role="doctor",
+            first_name="Carlos",
+            last_name="Mendoza",
+            phone="+573001234567"
+        )
+        
+        # Añadimos los datos de identidad reales para Elena
+        patient_user = User(
+            email="elena@aivi.com", 
+            hashed_password="hashed_pwd", 
+            role="patient",
+            first_name="Elena",
+            last_name="Giraldo",
+            phone="+573119876543"
+        )
         
         session.add_all([doc_user, patient_user])
         await session.flush()

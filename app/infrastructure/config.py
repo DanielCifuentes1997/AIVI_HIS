@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     DATABASE_URL: str
     REDIS_URL: str
+    GOOGLE_API_KEY: str
 
     @property
     def async_database_url(self) -> str:
