@@ -2,3 +2,6 @@ fastapi
 uvicorn
 pytest
 flake8
+sqlalchemy
+asyncpg
+pydantic-settings
