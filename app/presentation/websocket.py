@@ -1,6 +1,8 @@
+import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from app.application.agent import agent_executor
+from app.infrastructure.redis import redis_client
 
 router = APIRouter()
 
@@ -30,20 +32,44 @@ manager = ConnectionManager()
 @router.websocket("/ws/{patient_id}")
 async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
     await manager.connect(websocket)
+    redis_key = f"chat:{patient_id}"
     
-    initial_prompt = "El paciente acaba de conectarse. Salúdalo, preséntate brevemente y ofrécele las opciones de Citas, Historia Clínica o Medicamentos."
-    state = {"messages": [HumanMessage(content=initial_prompt)]}
+    cached_history = await redis_client.get(redis_key)
     
-    try:
+    if cached_history:
+        history_data = json.loads(cached_history)
+        messages = []
+        for msg in history_data:
+            if msg["role"] == "human":
+                messages.append(HumanMessage(content=msg["content"]))
+            else:
+                messages.append(AIMessage(content=msg["content"]))
+        state = {"messages": messages}
+        
+        ai_reply = state["messages"][-1].content
+        await manager.send_state_update(
+            websocket=websocket,
+            view="interaction",
+            data={"text": ai_reply}
+        )
+    else:
+        initial_prompt = "El paciente acaba de conectarse. Salúdalo, preséntate brevemente y ofrécele las opciones de Citas, Historia Clínica o Medicamentos."
+        state = {"messages": [HumanMessage(content=initial_prompt)]}
+        
         response = await agent_executor.ainvoke(state)
-        ai_reply = response["messages"][-1].content
+        state["messages"] = response["messages"]
+        ai_reply = state["messages"][-1].content
+        
+        history_data = [{"role": "human" if isinstance(m, HumanMessage) else "ai", "content": m.content} for m in state["messages"]]
+        await redis_client.set(redis_key, json.dumps(history_data), ex=3600)
         
         await manager.send_state_update(
             websocket=websocket,
             view="home",
             data={"text": ai_reply}
         )
-
+        
+    try:
         while True:
             data = await websocket.receive_json()
             
@@ -52,7 +78,11 @@ async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
                 state["messages"].append(user_msg)
                 
                 response = await agent_executor.ainvoke(state)
-                ai_reply = response["messages"][-1].content
+                state["messages"] = response["messages"]
+                ai_reply = state["messages"][-1].content
+                
+                history_data = [{"role": "human" if isinstance(m, HumanMessage) else "ai", "content": m.content} for m in state["messages"]]
+                await redis_client.set(redis_key, json.dumps(history_data), ex=3600)
                 
                 await manager.send_state_update(
                     websocket=websocket,
