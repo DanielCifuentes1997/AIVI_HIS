@@ -3,9 +3,13 @@ const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 const logoutBtn = document.getElementById('logout-btn');
 const statusIndicator = document.getElementById('connection-status');
+const micBtn = document.getElementById('mic-btn');
 
 let ws;
 let patientId = localStorage.getItem('patient_uuid');
+let mediaRecorder;
+let audioChunks = [];
+let isRecording = false;
 
 function requestPatientId() {
     if (!patientId) {
@@ -64,6 +68,48 @@ function sendMessage() {
     }
 }
 
+async function toggleRecording() {
+    if (isRecording) {
+        mediaRecorder.stop();
+        micBtn.classList.remove('recording');
+        isRecording = false;
+        return;
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                audioChunks.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            const reader = new FileReader();
+            reader.readAsDataURL(audioBlob);
+            reader.onloadend = () => {
+                const base64Audio = reader.result.split(',')[1];
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    appendMessage("🎙️ Audio enviado...", 'user-message');
+                    ws.send(JSON.stringify({ type: "AUDIO_ACTION", context: base64Audio }));
+                }
+            };
+            stream.getTracks().forEach(track => track.stop());
+        };
+
+        mediaRecorder.start();
+        micBtn.classList.add('recording');
+        isRecording = true;
+    } catch (error) {
+        console.error(error);
+        appendMessage("Error al acceder al micrófono. Verifica los permisos.", 'system-message');
+    }
+}
+
 function handleLogout() {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.close();
@@ -85,6 +131,7 @@ messageInput.addEventListener('keypress', (event) => {
     }
 });
 
+micBtn.addEventListener('click', toggleRecording);
 logoutBtn.addEventListener('click', handleLogout);
 
 requestPatientId();
