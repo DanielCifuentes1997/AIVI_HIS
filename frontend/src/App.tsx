@@ -1,0 +1,426 @@
+import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useAiViStore } from './store/useAiViStore';
+
+// ==========================================
+// PORTAL DEL PACIENTE (Voz + Consulta Órdenes)
+// ==========================================
+function PacienteView() {
+  const { 
+    patientId, setPatientId, connectWebSocket, disconnectWebSocket, 
+    isConnected, messages, sendMessage, sendAudioAction 
+  } = useAiViStore();
+
+  const [inputText, setInputText] = useState("");
+  const [uuidInput, setUuidInput] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [myOrders, setMyOrders] = useState<any[]>([]);
+  
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  useEffect(() => {
+    if (patientId && !isConnected) {
+      connectWebSocket(patientId);
+      fetchMyOrders();
+    }
+  }, [patientId, isConnected, connectWebSocket]);
+
+  const fetchMyOrders = async () => {
+    if (!patientId) return;
+    try {
+      const response = await fetch(`http://localhost:8000/api/patients/${patientId}/prescriptions`);
+      if (response.ok) {
+        const data = await response.json();
+        setMyOrders(data);
+      }
+    } catch (error) {
+      console.error("Error consultando recetas del paciente:", error);
+    }
+  };
+
+  const handleSendText = () => {
+    if (inputText.trim()) {
+      sendMessage(inputText.trim());
+      setInputText("");
+    }
+  };
+
+  const handleLogin = () => {
+    if (uuidInput.trim()) {
+      setPatientId(uuidInput.trim());
+    }
+  };
+
+  const toggleRecording = async () => {
+    if (isRecording && mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = () => {
+          if (reader.result) {
+            const base64Audio = (reader.result as string).split(',')[1];
+            sendAudioAction(base64Audio);
+          }
+        };
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error(error);
+      alert("Error al acceder al micrófono. Verifica los permisos.");
+    }
+  };
+
+  if (!patientId) {
+    return (
+      <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
+        <h1>AiVi - Acceso de Paciente</h1>
+        <p>Ingresa el UUID del paciente:</p>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <input 
+            type="text" value={uuidInput} onChange={(e) => setUuidInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+            placeholder="Ej: 5452f5a0-fd32-4f95-8152-..."
+            style={{ padding: '10px', width: '300px' }}
+          />
+          <button onClick={handleLogin} style={{ padding: '10px' }}>Ingresar</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1>AiVi - Asistente</h1>
+        <span style={{ fontWeight: 'bold', color: isConnected ? 'green' : 'red' }}>
+          {isConnected ? "🟢 Conectado" : "🔴 Desconectado"}
+        </span>
+      </div>
+      
+      <div style={{ 
+        height: '300px', overflowY: 'auto', border: '1px solid #ccc', 
+        borderRadius: '8px', padding: '15px', marginBottom: '15px', backgroundColor: '#f9f9f9'
+      }}>
+        {messages.map((msg, idx) => (
+          <div key={idx} style={{ 
+            marginBottom: '12px', textAlign: msg.sender === 'user-message' ? 'right' : 'left',
+            color: msg.sender === 'system-message' ? '#666' : '#000'
+          }}>
+            <div style={{
+              display: 'inline-block', padding: '10px 15px', borderRadius: '15px',
+              backgroundColor: msg.sender === 'user-message' ? '#d1e7dd' : msg.sender === 'ai-message' ? '#e2e3e5' : 'transparent',
+              border: msg.sender === 'system-message' ? '1px dashed #ccc' : 'none'
+            }}>
+              <strong>{msg.sender === 'ai-message' ? 'AiVi: ' : msg.sender === 'user-message' ? 'Tú: ' : ''}</strong>
+              {msg.text}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+        <input 
+          type="text" value={inputText} onChange={(e) => setInputText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSendText()}
+          placeholder="Escribe o habla con AiVi..."
+          style={{ flex: 1, padding: '12px', borderRadius: '4px', border: '1px solid #ccc' }}
+        />
+        <button onClick={handleSendText} disabled={!isConnected} style={{ padding: '12px 20px' }}>Enviar</button>
+        <button onClick={toggleRecording} disabled={!isConnected} style={{ padding: '12px 20px', backgroundColor: isRecording ? '#dc3545' : '#6c757d', color: 'white', border: 'none', borderRadius: '4px' }}>
+          {isRecording ? "⏹️ Detener" : "🎙️ Hablar"}
+        </button>
+      </div>
+
+      <div style={{ borderTop: '2px solid #ccc', paddingTop: '15px' }}>
+        <h3>📦 Estado de mis Medicamentos</h3>
+        <button onClick={fetchMyOrders} style={{ padding: '5px 10px', marginBottom: '10px' }}>Actualizar Consultas</button>
+        {myOrders.length === 0 ? <p>No tienes medicamentos registrados.</p> : (
+          <ul style={{ listStyleType: 'none', padding: 0 }}>
+            {myOrders.map((order, idx) => (
+              <li key={idx} style={{ padding: '10px', border: '1px solid #eee', marginBottom: '5px', borderRadius: '4px', backgroundColor: '#fff' }}>
+                <strong>Medicamentos:</strong> 
+                <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                  {order.prescription_data?.medications?.map((m: any, i: number) => (
+                    <li key={i}>{m.name} - {m.dose} ({m.frequency})</li>
+                  ))}
+                </ul>
+                <strong>Estado de Despacho:</strong> <span style={{ color: order.delivery_status === 'pending' ? 'orange' : 'blue', fontWeight: 'bold' }}>{order.delivery_status.toUpperCase()}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <button onClick={disconnectWebSocket} style={{ marginTop: '20px', padding: '10px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', width: '100%' }}>
+        Cerrar Sesión
+      </button>
+    </div>
+  );
+}
+
+// ==========================================
+// PORTAL DEL MÉDICO (Ahora con estructura anidada)
+// ==========================================
+function MedicoView() {
+  const [patientId, setPatientId] = useState('');
+  const [recordData, setRecordData] = useState({ weight: '', height: '', reason: '', diagnosis: '' });
+  const [appointmentDate, setAppointmentDate] = useState('');
+  const [recommendations, setRecommendations] = useState('');
+  
+  // Nuevo Estado Estructurado para Medicamentos
+  const [medications, setMedications] = useState([{ name: '', dose: '', frequency: '' }]);
+
+  const handleMedChange = (index: number, field: string, value: string) => {
+    const newMeds = [...medications];
+    newMeds[index] = { ...newMeds[index], [field]: value };
+    setMedications(newMeds);
+  };
+
+  const addMedication = () => setMedications([...medications, { name: '', dose: '', frequency: '' }]);
+  const removeMedication = (index: number) => {
+    const newMeds = medications.filter((_, i) => i !== index);
+    setMedications(newMeds);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Filtramos los medicamentos que estén vacíos por error
+    const validMeds = medications.filter(m => m.name.trim() !== '');
+
+    const payload = {
+      patient_id: patientId,
+      record_data: recordData,
+      prescription_data: validMeds.length > 0 ? { medications: validMeds } : null,
+      appointment: appointmentDate ? { date_time: appointmentDate, recommendations } : null
+    };
+
+    try {
+      const response = await fetch('http://localhost:8000/api/medical-consultation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (response.ok) {
+        alert('Consulta guardada. Medicamentos cargados como PENDING.');
+        setRecordData({ weight: '', height: '', reason: '', diagnosis: '' });
+        setMedications([{ name: '', dose: '', frequency: '' }]);
+        setAppointmentDate('');
+        setRecommendations('');
+      } else {
+        alert('Error al guardar consulta.');
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  return (
+    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto' }}>
+      <h2>Interfaz Médica (Data Estructurada)</h2>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+        <div style={{ border: '1px solid #ccc', padding: '10px' }}>
+          <h3>1. Selección de Paciente</h3>
+          <input placeholder="UUID del Paciente" required value={patientId} onChange={e => setPatientId(e.target.value)} style={{ padding: '8px', width: '100%' }}/>
+        </div>
+        
+        <div style={{ border: '1px solid #ccc', padding: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <h3>2. Historia Clínica (JSONB)</h3>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <input placeholder="Peso (kg)" value={recordData.weight} onChange={e => setRecordData({...recordData, weight: e.target.value})} style={{ padding: '8px', flex: 1 }}/>
+            <input placeholder="Talla (cm)" value={recordData.height} onChange={e => setRecordData({...recordData, height: e.target.value})} style={{ padding: '8px', flex: 1 }}/>
+          </div>
+          <input placeholder="Motivo de consulta" required value={recordData.reason} onChange={e => setRecordData({...recordData, reason: e.target.value})} style={{ padding: '8px' }}/>
+          <textarea placeholder="Diagnóstico" required value={recordData.diagnosis} onChange={e => setRecordData({...recordData, diagnosis: e.target.value})} style={{ padding: '8px', minHeight: '60px' }}/>
+        </div>
+
+        <div style={{ border: '1px solid #ccc', padding: '10px' }}>
+          <h3>3. Prescripción Médica (Estructurada)</h3>
+          {medications.map((med, index) => (
+            <div key={index} style={{ display: 'flex', gap: '5px', marginBottom: '10px', alignItems: 'center' }}>
+              <input placeholder="Medicamento (Ej: Ibuprofeno)" value={med.name} onChange={e => handleMedChange(index, 'name', e.target.value)} style={{ padding: '8px', flex: 1 }} />
+              <input placeholder="Dosis (Ej: 400mg)" value={med.dose} onChange={e => handleMedChange(index, 'dose', e.target.value)} style={{ padding: '8px', width: '100px' }} />
+              <input placeholder="Frecuencia (Ej: Cada 8h)" value={med.frequency} onChange={e => handleMedChange(index, 'frequency', e.target.value)} style={{ padding: '8px', width: '120px' }} />
+              {medications.length > 1 && (
+                <button type="button" onClick={() => removeMedication(index)} style={{ padding: '8px', backgroundColor: 'red', color: 'white', border: 'none', cursor: 'pointer' }}>X</button>
+              )}
+            </div>
+          ))}
+          <button type="button" onClick={addMedication} style={{ padding: '8px', backgroundColor: '#007bff', color: 'white', border: 'none', cursor: 'pointer' }}>+ Agregar Medicamento</button>
+        </div>
+
+        <div style={{ border: '1px solid #ccc', padding: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <h3>4. Próxima Cita (Opcional)</h3>
+          <input type="datetime-local" value={appointmentDate} onChange={e => setAppointmentDate(e.target.value)} style={{ padding: '8px' }}/>
+          <input placeholder="Recomendaciones" value={recommendations} onChange={e => setRecommendations(e.target.value)} style={{ padding: '8px' }}/>
+        </div>
+        <button type="submit" style={{ padding: '12px', backgroundColor: '#28a745', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Guardar Consulta</button>
+      </form>
+    </div>
+  );
+}
+
+// ==========================================
+// PORTAL DEL ADMINISTRADOR
+// ==========================================
+function AdminView() {
+  const [formData, setFormData] = useState({
+    first_name: '', last_name: '', email: '', phone: '', document_id: '', blood_type: '', address: ''
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const response = await fetch('http://localhost:8000/api/patients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      if (response.ok) {
+        const res = await response.json();
+        alert(`Paciente creado en la BD. UUID: ${res.patient_id}. Compártele este ID para que inicie sesión.`);
+        setFormData({ first_name: '', last_name: '', email: '', phone: '', document_id: '', blood_type: '', address: '' });
+      } else {
+        alert('Error al crear paciente.');
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  return (
+    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto' }}>
+      <h2>Panel Administrativo (KYC)</h2>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <input placeholder="Nombres" required value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} style={{ padding: '8px' }}/>
+        <input placeholder="Apellidos" required value={formData.last_name} onChange={e => setFormData({...formData, last_name: e.target.value})} style={{ padding: '8px' }}/>
+        <input type="email" placeholder="Correo" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} style={{ padding: '8px' }}/>
+        <input placeholder="Teléfono" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} style={{ padding: '8px' }}/>
+        <input placeholder="Documento" required value={formData.document_id} onChange={e => setFormData({...formData, document_id: e.target.value})} style={{ padding: '8px' }}/>
+        <input placeholder="Tipo Sangre" value={formData.blood_type} onChange={e => setFormData({...formData, blood_type: e.target.value})} style={{ padding: '8px' }}/>
+        <input placeholder="Dirección" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} style={{ padding: '8px' }}/>
+        <button type="submit" style={{ padding: '10px', backgroundColor: '#007bff', color: 'white', border: 'none' }}>Guardar Paciente</button>
+      </form>
+    </div>
+  );
+}
+
+// ==========================================
+// PORTAL DE LA FARMACIA (Tablero Reactivo)
+// ==========================================
+function FarmaciaView() {
+  const [orders, setOrders] = useState<any[]>([]);
+
+  const fetchOrders = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/farmacia/orders');
+      if (response.ok) {
+        const data = await response.json();
+        setOrders(data);
+      }
+    } catch (error) {
+      console.error("Error jalando órdenes de farmacia:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders();
+    const interval = setInterval(fetchOrders, 5000); // Polling cada 5s para simular tiempo real
+    return () => clearInterval(interval);
+  }, []);
+
+  // Aquí está corregido el error de TypeScript (str -> string)
+  const updateStatus = async (orderId: string, status: 'alistando' | 'despacho') => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/farmacia/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delivery_status: status })
+      });
+      if (response.ok) {
+        fetchOrders();
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  return (
+    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto' }}>
+      <h2>Tablero de Control de Farmacia</h2>
+      <p>Muestra las recetas que los pacientes ya autorizaron con su firma electrónica (Delivery status != pending).</p>
+      <button onClick={fetchOrders} style={{ marginBottom: '15px', padding: '8px' }}>Refrescar Tablero</button>
+      
+      {orders.length === 0 ? <p>No hay órdenes autorizadas para despacho en este momento.</p> : (
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
+          <thead>
+            <tr style={{ backgroundColor: '#eee', textAlign: 'left' }}>
+              <th style={{ padding: '10px', border: '1px solid #ccc' }}>ID Orden</th>
+              <th style={{ padding: '10px', border: '1px solid #ccc' }}>Medicamentos</th>
+              <th style={{ padding: '10px', border: '1px solid #ccc' }}>Estado Actual</th>
+              <th style={{ padding: '10px', border: '1px solid #ccc' }}>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map((order) => (
+              <tr key={order.id}>
+                <td style={{ padding: '10px', border: '1px solid #ccc' }}>{order.id.slice(0,8)}...</td>
+                <td style={{ padding: '10px', border: '1px solid #ccc' }}>
+                  {order.prescription_data?.medications?.map((m:any) => m.name).join(', ')}
+                </td>
+                <td style={{ padding: '10px', border: '1px solid #ccc', fontWeight: 'bold' }}>{order.delivery_status.toUpperCase()}</td>
+                <td style={{ padding: '10px', border: '1px solid #ccc', display: 'flex', gap: '5px' }}>
+                  <button onClick={() => updateStatus(order.id, 'alistando')} style={{ backgroundColor: 'orange', border: 'none', padding: '5px', cursor: 'pointer' }}>Alistando</button>
+                  <button onClick={() => updateStatus(order.id, 'despacho')} style={{ backgroundColor: 'green', color: 'white', border: 'none', padding: '5px', cursor: 'pointer' }}>Despacho</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// ENRUTADOR PRINCIPAL
+// ==========================================
+export default function App() {
+  return (
+    <Router>
+      <div style={{ backgroundColor: '#333', padding: '15px', color: 'white', display: 'flex', gap: '20px', fontFamily: 'sans-serif' }}>
+        <strong>🏥 AiVi HIS</strong>
+        <Link to="/paciente" style={{ color: '#61dafb', textDecoration: 'none' }}>Portal Paciente</Link>
+        <Link to="/medico" style={{ color: '#61dafb', textDecoration: 'none' }}>Portal Médico</Link>
+        <Link to="/admin" style={{ color: '#61dafb', textDecoration: 'none' }}>Admin KYC</Link>
+        <Link to="/farmacia" style={{ color: '#61dafb', textDecoration: 'none' }}>Dashboard Farmacia</Link>
+      </div>
+      <Routes>
+        <Route path="/paciente" element={<PacienteView />} />
+        <Route path="/medico" element={<MedicoView />} />
+        <Route path="/admin" element={<AdminView />} />
+        <Route path="/farmacia" element={<FarmaciaView />} />
+        <Route path="*" element={<Navigate to="/paciente" replace />} />
+      </Routes>
+    </Router>
+  );
+}
