@@ -63,6 +63,31 @@ async def _transcribe_audio(base64_audio: str) -> str:
             return result["results"]["channels"][0]["alternatives"][0]["transcript"]
         return "Lo siento, no pude procesar el audio correctamente."
 
+async def _synthesize_speech(text: str) -> str:
+    api_key = os.getenv("ELEVENLABS_API_KEY")
+    if not api_key:
+        return ""
+    
+    url = "https://api.elevenlabs.io/v1/text-to-speech/ErXwobaYiN019PkySvjV"
+    headers = {
+        "xi-api-key": api_key,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "text": text,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.75
+        }
+    }
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, headers=headers, json=payload)
+        if response.status_code == 200:
+            return base64.b64encode(response.content).decode("utf-8")
+        return ""
+
 @router.websocket("/ws/{patient_id}")
 async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
     await manager.connect(websocket)
@@ -75,10 +100,11 @@ async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
         state = {"messages": messages}
         
         ai_reply = _extract_text(state["messages"][-1].content)
+        audio_base64 = await _synthesize_speech(ai_reply)
         await manager.send_state_update(
             websocket=websocket,
             view="interaction",
-            data={"text": ai_reply}
+            data={"text": ai_reply, "audio": audio_base64}
         )
     else:
         async with AsyncSessionLocal() as session:
@@ -101,10 +127,11 @@ async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
         history_data = messages_to_dict(state["messages"])
         await redis_client.set(redis_key, json.dumps(history_data), ex=3600)
         
+        audio_base64 = await _synthesize_speech(ai_reply)
         await manager.send_state_update(
             websocket=websocket,
             view="home",
-            data={"text": ai_reply}
+            data={"text": ai_reply, "audio": audio_base64}
         )
         
     try:
@@ -129,10 +156,11 @@ async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
                 history_data = messages_to_dict(state["messages"])
                 await redis_client.set(redis_key, json.dumps(history_data), ex=3600)
                 
+                audio_base64 = await _synthesize_speech(ai_reply)
                 await manager.send_state_update(
                     websocket=websocket,
                     view="interaction",
-                    data={"text": ai_reply}
+                    data={"text": ai_reply, "audio": audio_base64}
                 )
 
     except WebSocketDisconnect:

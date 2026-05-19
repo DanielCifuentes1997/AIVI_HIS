@@ -37,6 +37,9 @@ function connectWebSocket() {
         const data = JSON.parse(event.data);
         if (data.type === "STATE_UPDATE" && data.payload && data.payload.data) {
             appendMessage(data.payload.data.text, 'ai-message');
+            if (data.payload.data.audio) {
+                playAudio(data.payload.data.audio);
+            }
         }
     };
 
@@ -49,6 +52,12 @@ function connectWebSocket() {
         console.error(error);
         statusIndicator.classList.remove('connected');
     };
+}
+
+function playAudio(base64Audio) {
+    const audioUrl = `data:audio/mpeg;base64,${base64Audio}`;
+    const audio = new Audio(audioUrl);
+    audio.play().catch(error => console.error(error));
 }
 
 function appendMessage(message, className) {
