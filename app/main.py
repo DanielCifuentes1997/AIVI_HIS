@@ -1,13 +1,17 @@
-from fastapi import FastAPI, HTTPException, Depends
+import os
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 from datetime import datetime
+from passlib.context import CryptContext
 
 from sqlalchemy.future import select
 from app.infrastructure.database import AsyncSessionLocal
 from app.domain.models import User, Patient, ClinicalRecord, Prescription, Appointment
 from app.presentation.websocket import router as websocket_router
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 app = FastAPI(title="AiVi MVP API")
 
@@ -56,9 +60,10 @@ async def create_patient(data: PatientCreateSchema):
             if doc_check.scalars().first():
                 raise HTTPException(status_code=400, detail="El documento de identidad ya esta registrado")
 
+            hashed_pw = pwd_context.hash(os.getenv("DEFAULT_PATIENT_PASSWORD"))
             new_user = User(
                 email=data.email,
-                hashed_password="mock_password_123",
+                hashed_password=hashed_pw,
                 role="patient",
                 first_name=data.first_name,
                 last_name=data.last_name,
@@ -75,7 +80,6 @@ async def create_patient(data: PatientCreateSchema):
                 biometric_landmarks=data.biometric_landmarks
             )
             session.add(new_patient)
-            
             return {"status": "success", "patient_id": new_patient.id, "user_id": new_user.id}
 
 @app.post("/api/medical-consultation")
@@ -93,7 +97,7 @@ async def create_medical_consultation(data: ConsultationSchema):
             if not doctor:
                 doctor = User(
                     email=mock_doctor_email,
-                    hashed_password="mock_password_123",
+                    hashed_password=pwd_context.hash(os.getenv("DEFAULT_DOCTOR_PASSWORD", "temp_secure_pw")),
                     role="doctor",
                     first_name="Médico",
                     last_name="De Prueba"
@@ -101,11 +105,9 @@ async def create_medical_consultation(data: ConsultationSchema):
                 session.add(doctor)
                 await session.flush()
             
-            real_doctor_id = doctor.id
-
             new_record = ClinicalRecord(
                 patient_id=data.patient_id,
-                doctor_id=real_doctor_id,
+                doctor_id=doctor.id,
                 record_data=data.record_data
             )
             session.add(new_record)
@@ -113,7 +115,7 @@ async def create_medical_consultation(data: ConsultationSchema):
             if data.prescription_data:
                 new_prescription = Prescription(
                     patient_id=data.patient_id,
-                    doctor_id=real_doctor_id,
+                    doctor_id=doctor.id,
                     delivery_status="pending",
                     prescription_data=data.prescription_data
                 )
@@ -127,14 +129,14 @@ async def create_medical_consultation(data: ConsultationSchema):
 
                 new_appointment = Appointment(
                     patient_id=data.patient_id,
-                    doctor_id=real_doctor_id,
+                    doctor_id=doctor.id,
                     date_time=dt,
                     status="scheduled",
                     recommendations=data.appointment.get("recommendations")
                 )
                 session.add(new_appointment)
 
-            return {"status": "success", "message": "Modulo Medico conectado exitosamente con el Paciente"}
+            return {"status": "success", "message": "Consulta guardada"}
 
 @app.get("/api/patients/{patient_id}/prescriptions")
 async def get_patient_prescriptions(patient_id: str):
@@ -155,17 +157,13 @@ async def get_pharmacy_orders():
         stmt = select(Prescription).where(Prescription.delivery_status != "pending")
         result = await session.execute(stmt)
         prescriptions = result.scalars().all()
-        
-        orders = []
-        for p in prescriptions:
-            orders.append({
-                "id": p.id,
-                "patient_id": p.patient_id,
-                "prescription_data": p.prescription_data,
-                "delivery_status": p.delivery_status,
-                "created_at": p.created_at.isoformat()
-            })
-        return orders
+        return [{
+            "id": p.id,
+            "patient_id": p.patient_id,
+            "prescription_data": p.prescription_data,
+            "delivery_status": p.delivery_status,
+            "created_at": p.created_at.isoformat()
+        } for p in prescriptions]
 
 @app.patch("/api/farmacia/orders/{order_id}")
 async def update_order_status(order_id: str, data: OrderStatusUpdateSchema):
@@ -174,9 +172,7 @@ async def update_order_status(order_id: str, data: OrderStatusUpdateSchema):
             stmt = select(Prescription).where(Prescription.id == order_id)
             result = await session.execute(stmt)
             prescription = result.scalars().first()
-            
             if not prescription:
                 raise HTTPException(status_code=404, detail="Orden no encontrada")
-            
             prescription.delivery_status = data.delivery_status
             return {"status": "success", "updated_status": prescription.delivery_status}
