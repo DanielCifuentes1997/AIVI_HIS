@@ -10,6 +10,7 @@ from passlib.context import CryptContext
 from sqlalchemy.future import select
 from app.infrastructure.database import AsyncSessionLocal
 from app.domain.models import User, Patient, ClinicalRecord, Prescription, Appointment, ElectronicSignature
+from app.infrastructure.config import settings
 from app.presentation.websocket import router as websocket_router
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -65,7 +66,7 @@ async def create_patient(data: PatientCreateSchema):
             if doc_check.scalars().first():
                 raise HTTPException(status_code=400, detail="El documento de identidad ya esta registrado")
 
-            hashed_pw = pwd_context.hash(os.getenv("DEFAULT_PATIENT_PASSWORD", "temp_pw"))
+            hashed_pw = pwd_context.hash(settings.DEFAULT_PATIENT_PASSWORD)
             new_user = User(
                 email=data.email,
                 hashed_password=hashed_pw,
@@ -102,7 +103,7 @@ async def create_medical_consultation(data: ConsultationSchema):
             if not doctor:
                 doctor = User(
                     email=mock_doctor_email,
-                    hashed_password=pwd_context.hash(os.getenv("DEFAULT_DOCTOR_PASSWORD", "temp_secure_pw")),
+                    hashed_password=pwd_context.hash(settings.DEFAULT_DOCTOR_PASSWORD),
                     role="doctor",
                     first_name="Médico",
                     last_name="De Prueba"
