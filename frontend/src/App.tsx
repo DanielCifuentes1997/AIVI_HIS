@@ -17,12 +17,41 @@ function PacienteView() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  // --- Liveness Detection States ---
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [faceLandmarker, setFaceLandmarker] = useState<FaceLandmarker | null>(null);
+  const [isLivenessPassed, setIsLivenessPassed] = useState(false);
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
   useEffect(() => {
     if (patientId && !isConnected) {
       connectWebSocket(patientId);
       fetchMyOrders();
+      loadBiometricModel(); 
     }
   }, [patientId, isConnected, connectWebSocket]);
+
+  const loadBiometricModel = async () => {
+    try {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+      const landmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+          delegate: "GPU"
+        },
+        outputFaceBlendshapes: true,
+        runningMode: "VIDEO",
+        numFaces: 1
+      });
+      setFaceLandmarker(landmarker);
+    } catch (error) {
+      console.error("Error loading MediaPipe:", error);
+    }
+  };
 
   const fetchMyOrders = async () => {
     if (!patientId) return;
@@ -34,6 +63,131 @@ function PacienteView() {
       }
     } catch (error) {
       console.error(error);
+    }
+  };
+
+  // --- Biometric Flow ---
+  const startLivenessCheck = async (orderId: string) => {
+    if (!faceLandmarker) {
+      alert("El motor biométrico aún se está cargando. Intenta en un momento.");
+      return;
+    }
+    setActiveOrderId(orderId);
+    setIsLivenessPassed(false);
+    
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        streamRef.current = stream;
+        videoRef.current.addEventListener("loadeddata", predictLiveness);
+        setIsCameraActive(true);
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Error accediendo a la cámara. Revisa los permisos del navegador.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsCameraActive(false);
+  };
+
+  // Función criptográfica: Genera token JWS con Web Crypto API
+  const generateAndSendSignature = async (orderId: string) => {
+    try {
+      // 1. Generar par de llaves asimétricas (Curva Elíptica P-256)
+      const keyPair = await window.crypto.subtle.generateKey(
+        { name: "ECDSA", namedCurve: "P-256" },
+        true,
+        ["sign", "verify"]
+      );
+
+      // 2. Construir Header y Payload del JWS
+      const header = { alg: "ES256", typ: "JWT" };
+      const payload = {
+        jti: crypto.randomUUID(),
+        sub: patientId,
+        order_id: orderId,
+        liveness: "passed",
+        iat: Math.floor(Date.now() / 1000)
+      };
+
+      // Codificador Base64URL
+      const base64UrlEncode = (obj: any) => 
+        btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      
+      const encodedHeader = base64UrlEncode(header);
+      const encodedPayload = base64UrlEncode(payload);
+      const dataToSign = `${encodedHeader}.${encodedPayload}`;
+
+      // 3. Firmar los datos con la llave privada generada localmente
+      const encoder = new TextEncoder();
+      const signature = await window.crypto.subtle.sign(
+        { name: "ECDSA", hash: { name: "SHA-256" } },
+        keyPair.privateKey,
+        encoder.encode(dataToSign)
+      );
+
+      // 4. Convertir firma y empaquetar JWS
+      const signatureArray = Array.from(new Uint8Array(signature));
+      const signatureBase64Url = btoa(String.fromCharCode.apply(null, signatureArray))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      
+      const jwsToken = `${dataToSign}.${signatureBase64Url}`;
+
+      // 5. Enviar el token al Backend
+      console.log("Token JWS Generado (Edge):", jwsToken);
+      const response = await fetch(`http://localhost:8000/api/prescriptions/${orderId}/sign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          jws_token: jwsToken, 
+          liveness_status: "passed" 
+        })
+      });
+
+      if (response.ok) {
+        alert("✅ Firma electrónica aplicada. La farmacia ya tiene la autorización.");
+        fetchMyOrders(); // Refrescar tablero del paciente
+      } else {
+        alert("Error al validar la firma en el servidor.");
+      }
+
+    } catch (error) {
+      console.error("Error en criptografía local:", error);
+      alert("Error al generar la firma electrónica.");
+    }
+  };
+
+  const predictLiveness = async () => {
+    if (!videoRef.current || !faceLandmarker) return;
+    const startTimeMs = performance.now();
+    const results = faceLandmarker.detectForVideo(videoRef.current, startTimeMs);
+
+    if (results.faceBlendshapes && results.faceBlendshapes.length > 0) {
+      const blendshapes = results.faceBlendshapes[0].categories;
+      const jawOpen = blendshapes.find(b => b.categoryName === "jawOpen")?.score || 0;
+
+      // Si la apertura de mandíbula es mayor a 0.15
+      if (jawOpen > 0.15) {
+        setIsLivenessPassed(true);
+        stopCamera();
+        
+        // ¡Magia! Llamamos a la criptografía pasándole el ID de la orden activa
+        if (activeOrderId) {
+          await generateAndSendSignature(activeOrderId);
+        }
+        return; 
+      }
+    }
+    
+    if (streamRef.current) {
+      window.requestAnimationFrame(predictLiveness);
     }
   };
 
@@ -151,6 +305,7 @@ function PacienteView() {
       <div style={{ borderTop: '2px solid #ccc', paddingTop: '15px' }}>
         <h3>📦 Estado de mis Medicamentos</h3>
         <button onClick={fetchMyOrders} style={{ padding: '5px 10px', marginBottom: '10px' }}>Actualizar Consultas</button>
+        
         {myOrders.length === 0 ? <p>No tienes medicamentos registrados.</p> : (
           <ul style={{ listStyleType: 'none', padding: 0 }}>
             {myOrders.map((order, idx) => (
@@ -162,10 +317,36 @@ function PacienteView() {
                   ))}
                 </ul>
                 <strong>Estado de Despacho:</strong> <span style={{ color: order.delivery_status === 'pending' ? 'orange' : 'blue', fontWeight: 'bold' }}>{order.delivery_status.toUpperCase()}</span>
+                
+                {order.delivery_status === 'pending' && !isCameraActive && (
+                  <div style={{ marginTop: '10px' }}>
+                    <button 
+                      onClick={() => startLivenessCheck(order.id)} 
+                      style={{ padding: '8px', backgroundColor: '#0dcaf0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      📸 Autorizar con Rostro
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
         )}
+
+        {/* ZONA DE CÁMARA (FUERA DEL BUCLE) */}
+        <div style={{ 
+          display: isCameraActive ? 'block' : 'none', 
+          marginTop: '20px', border: '2px dashed #0dcaf0', padding: '15px', 
+          textAlign: 'center', backgroundColor: '#f8f9fa', borderRadius: '8px' 
+        }}>
+          <h4>Autorizando Orden</h4>
+          <p>Mire a la cámara y abra la boca para confirmar su identidad.</p>
+          <video ref={videoRef} autoPlay playsInline style={{ width: '100%', maxWidth: '300px', margin: '0 auto', transform: 'scaleX(-1)' }}></video>
+          <br/>
+          <button onClick={stopCamera} style={{ marginTop: '10px', padding: '8px 20px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+            Cancelar Escaneo
+          </button>
+        </div>
       </div>
 
       <button onClick={disconnectWebSocket} style={{ marginTop: '20px', padding: '10px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', width: '100%' }}>
@@ -357,7 +538,6 @@ function AdminView() {
       console.log("Respuesta del servidor:", res);
       
       if (response.ok) {
-        const res = await response.json();
         alert(`Paciente creado en la BD. UUID: ${res.patient_id}.`);
         setFormData({ first_name: '', last_name: '', email: '', phone: '', document_id: '', blood_type: '', address: '', biometric_landmarks: null });
       } else {

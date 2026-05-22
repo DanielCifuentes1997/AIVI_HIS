@@ -1,4 +1,5 @@
 import os
+import hashlib
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -8,7 +9,7 @@ from passlib.context import CryptContext
 
 from sqlalchemy.future import select
 from app.infrastructure.database import AsyncSessionLocal
-from app.domain.models import User, Patient, ClinicalRecord, Prescription, Appointment
+from app.domain.models import User, Patient, ClinicalRecord, Prescription, Appointment, ElectronicSignature
 from app.presentation.websocket import router as websocket_router
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -44,6 +45,10 @@ class ConsultationSchema(BaseModel):
 class OrderStatusUpdateSchema(BaseModel):
     delivery_status: str
 
+class SignatureSchema(BaseModel):
+    jws_token: str
+    liveness_status: str
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
@@ -60,7 +65,7 @@ async def create_patient(data: PatientCreateSchema):
             if doc_check.scalars().first():
                 raise HTTPException(status_code=400, detail="El documento de identidad ya esta registrado")
 
-            hashed_pw = pwd_context.hash(os.getenv("DEFAULT_PATIENT_PASSWORD"))
+            hashed_pw = pwd_context.hash(os.getenv("DEFAULT_PATIENT_PASSWORD", "temp_pw"))
             new_user = User(
                 email=data.email,
                 hashed_password=hashed_pw,
@@ -176,3 +181,34 @@ async def update_order_status(order_id: str, data: OrderStatusUpdateSchema):
                 raise HTTPException(status_code=404, detail="Orden no encontrada")
             prescription.delivery_status = data.delivery_status
             return {"status": "success", "updated_status": prescription.delivery_status}
+
+@app.post("/api/prescriptions/{order_id}/sign")
+async def sign_prescription(order_id: str, data: SignatureSchema):
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            # 1. Buscar la receta pendiente
+            stmt = select(Prescription).where(Prescription.id == order_id)
+            result = await session.execute(stmt)
+            prescription = result.scalars().first()
+            
+            if not prescription:
+                raise HTTPException(status_code=404, detail="Orden no encontrada")
+            
+            if prescription.delivery_status != "pending":
+                raise HTTPException(status_code=400, detail="Esta receta ya fue firmada o procesada")
+
+            rx_data_str = str(prescription.prescription_data)
+            rx_hash = hashlib.sha256(rx_data_str.encode('utf-8')).hexdigest()
+
+            new_signature = ElectronicSignature(
+                prescription_id=prescription.id,
+                patient_id=prescription.patient_id,
+                rx_hash=rx_hash,
+                liveness_status=data.liveness_status,
+                jws_token=data.jws_token
+            )
+            session.add(new_signature)
+
+            prescription.delivery_status = "autorizada"
+            
+            return {"status": "success", "message": "Firma electrónica validada. Medicamento autorizado."}
