@@ -29,6 +29,7 @@ class PatientCreateSchema(BaseModel):
     document_id: str
     blood_type: Optional[str] = None
     address: Optional[str] = None
+    biometric_landmarks: Optional[Any] = None
 
 class ConsultationSchema(BaseModel):
     patient_id: str
@@ -71,7 +72,7 @@ async def create_patient(data: PatientCreateSchema):
                 document_id=data.document_id,
                 blood_type=data.blood_type,
                 address=data.address,
-                biometric_landmarks=None
+                biometric_landmarks=data.biometric_landmarks
             )
             session.add(new_patient)
             
@@ -81,12 +82,10 @@ async def create_patient(data: PatientCreateSchema):
 async def create_medical_consultation(data: ConsultationSchema):
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            # 1. Validar que el paciente exista
             patient_check = await session.execute(select(Patient).where(Patient.id == data.patient_id))
             if not patient_check.scalars().first():
                 raise HTTPException(status_code=404, detail="Paciente no encontrado")
 
-            # 2. Buscar o crear el Doctor Mock de forma dinámica para cumplir la llave foránea
             mock_doctor_email = "medico@aivi.com"
             doctor_check = await session.execute(select(User).where(User.email == mock_doctor_email))
             doctor = doctor_check.scalars().first()
@@ -100,11 +99,10 @@ async def create_medical_consultation(data: ConsultationSchema):
                     last_name="De Prueba"
                 )
                 session.add(doctor)
-                await session.flush() # Flush para obtener el ID real de la base de datos
+                await session.flush()
             
             real_doctor_id = doctor.id
 
-            # 3. Guardar la Evolución Clínica
             new_record = ClinicalRecord(
                 patient_id=data.patient_id,
                 doctor_id=real_doctor_id,
@@ -112,7 +110,6 @@ async def create_medical_consultation(data: ConsultationSchema):
             )
             session.add(new_record)
 
-            # 4. Guardar los Medicamentos (Pendientes)
             if data.prescription_data:
                 new_prescription = Prescription(
                     patient_id=data.patient_id,
@@ -122,7 +119,6 @@ async def create_medical_consultation(data: ConsultationSchema):
                 )
                 session.add(new_prescription)
 
-            # 5. Guardar la Cita Médica
             if data.appointment:
                 try:
                     dt = datetime.fromisoformat(data.appointment["date_time"])
