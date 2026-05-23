@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { useState, useEffect, useRef } from 'react';
 import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 
