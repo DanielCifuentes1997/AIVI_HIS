@@ -62,7 +62,7 @@ async def test_sign_prescription_not_found():
         response = await ac.post(
             f"/api/prescriptions/{fake_order_id}/sign",
             json={
-                "jws_token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9",
+                "jws_token": "token.falso.de.prueba",
                 "liveness_status": "passed"
             }
         )
