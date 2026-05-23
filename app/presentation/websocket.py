@@ -1,3 +1,4 @@
+import re
 import json
 import base64
 import os
@@ -100,7 +101,10 @@ async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
         state = {"messages": messages}
         
         ai_reply = _extract_text(state["messages"][-1].content)
-        audio_base64 = await _synthesize_speech(ai_reply)
+        # Limpieza para voz
+        text_for_audio = re.sub(r'\[TRIGGER_CAMERA_[a-zA-Z0-9-]+\]', '', ai_reply).strip()
+        audio_base64 = await _synthesize_speech(text_for_audio)
+        
         await manager.send_state_update(
             websocket=websocket,
             view="interaction",
@@ -115,8 +119,9 @@ async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
 
         initial_prompt = (
             f"El paciente se llama '{patient_name}' y su ID en el sistema es '{patient_id}'. "
-            f"Acaba de conectarse. Salúdalo cordialmente por su nombre de pila, preséntate brevemente "
-            f"como AiVi y ofrécele las opciones de Citas, Historia Clínica o Medicamentos."
+            f"Acaba de iniciar sesión. Omitiendo el ID, salúdalo por su nombre como: "
+            f"'Hola {patient_name}, soy AiVi, tu asistente médico virtual. ¿En qué te puedo ayudar hoy? "
+            f"Puedes consultarme sobre tus Citas Médicas, tus Medicamentos Pendientes o el resumen de tu Historia Clínica.'"
         )
         state = {"messages": [HumanMessage(content=initial_prompt)]}
         
@@ -127,7 +132,10 @@ async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
         history_data = messages_to_dict(state["messages"])
         await redis_client.set(redis_key, json.dumps(history_data), ex=3600)
         
-        audio_base64 = await _synthesize_speech(ai_reply)
+        # Limpieza para voz
+        text_for_audio = re.sub(r'\[TRIGGER_CAMERA_[a-zA-Z0-9-]+\]', '', ai_reply).strip()
+        audio_base64 = await _synthesize_speech(text_for_audio)
+        
         await manager.send_state_update(
             websocket=websocket,
             view="home",
@@ -156,7 +164,10 @@ async def multimodal_endpoint(websocket: WebSocket, patient_id: str):
                 history_data = messages_to_dict(state["messages"])
                 await redis_client.set(redis_key, json.dumps(history_data), ex=3600)
                 
-                audio_base64 = await _synthesize_speech(ai_reply)
+                # Limpieza para voz
+                text_for_audio = re.sub(r'\[TRIGGER_CAMERA_[a-zA-Z0-9-]+\]', '', ai_reply).strip()
+                audio_base64 = await _synthesize_speech(text_for_audio)
+                
                 await manager.send_state_update(
                     websocket=websocket,
                     view="interaction",

@@ -25,6 +25,17 @@ function PacienteView() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // --- VAD (Hands-Free) States & Refs ---
+  const [isAutoMode, setIsAutoMode] = useState(false);
+  const [vadStatus, setVadStatus] = useState("Inactivo");
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const vadStreamRef = useRef<MediaStream | null>(null);
+  const isSpeakingRef = useRef(false);
+  const isAutoModeRef = useRef(false);
+  const silenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loopRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (patientId && !isConnected) {
       connectWebSocket(patientId);
@@ -32,6 +43,15 @@ function PacienteView() {
       loadBiometricModel(); 
     }
   }, [patientId, isConnected, connectWebSocket]);
+
+  // Limpieza de recursos VAD al desmontar
+  useEffect(() => {
+    return () => {
+      if (loopRef.current) cancelAnimationFrame(loopRef.current);
+      if (audioContextRef.current) audioContextRef.current.close();
+      if (vadStreamRef.current) vadStreamRef.current.getTracks().forEach(t => t.stop());
+    };
+  }, []);
 
   const loadBiometricModel = async () => {
     try {
@@ -52,6 +72,20 @@ function PacienteView() {
       console.error("Error loading MediaPipe:", error);
     }
   };
+
+  // Comandos de voz
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg.sender === 'ai-message') {
+        const match = lastMsg.text.match(/\[TRIGGER_CAMERA_([a-zA-Z0-9-]+)\]/);
+        if (match && !isCameraActive) {
+          const orderId = match[1];
+          startLivenessCheck(orderId);
+        }
+      }
+    }
+  }, [messages]);
 
   const fetchMyOrders = async () => {
     if (!patientId) return;
@@ -97,17 +131,14 @@ function PacienteView() {
     setIsCameraActive(false);
   };
 
-  // Función criptográfica: Genera token JWS con Web Crypto API
   const generateAndSendSignature = async (orderId: string) => {
     try {
-      // 1. Generar par de llaves asimétricas (Curva Elíptica P-256)
       const keyPair = await window.crypto.subtle.generateKey(
         { name: "ECDSA", namedCurve: "P-256" },
         true,
         ["sign", "verify"]
       );
 
-      // 2. Construir Header y Payload del JWS
       const header = { alg: "ES256", typ: "JWT" };
       const payload = {
         jti: crypto.randomUUID(),
@@ -117,7 +148,6 @@ function PacienteView() {
         iat: Math.floor(Date.now() / 1000)
       };
 
-      // Codificador Base64URL
       const base64UrlEncode = (obj: any) => 
         btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       
@@ -125,7 +155,6 @@ function PacienteView() {
       const encodedPayload = base64UrlEncode(payload);
       const dataToSign = `${encodedHeader}.${encodedPayload}`;
 
-      // 3. Firmar los datos con la llave privada generada localmente
       const encoder = new TextEncoder();
       const signature = await window.crypto.subtle.sign(
         { name: "ECDSA", hash: { name: "SHA-256" } },
@@ -133,14 +162,12 @@ function PacienteView() {
         encoder.encode(dataToSign)
       );
 
-      // 4. Convertir firma y empaquetar JWS
       const signatureArray = Array.from(new Uint8Array(signature));
       const signatureBase64Url = btoa(String.fromCharCode.apply(null, signatureArray))
         .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       
       const jwsToken = `${dataToSign}.${signatureBase64Url}`;
 
-      // 5. Enviar el token al Backend
       console.log("Token JWS Generado (Edge):", jwsToken);
       const response = await fetch(`http://localhost:8000/api/prescriptions/${orderId}/sign`, {
         method: 'POST',
@@ -153,11 +180,10 @@ function PacienteView() {
 
       if (response.ok) {
         alert("✅ Firma electrónica aplicada. La farmacia ya tiene la autorización.");
-        fetchMyOrders(); // Refrescar tablero del paciente
+        fetchMyOrders(); 
       } else {
         alert("Error al validar la firma en el servidor.");
       }
-
     } catch (error) {
       console.error("Error en criptografía local:", error);
       alert("Error al generar la firma electrónica.");
@@ -173,12 +199,9 @@ function PacienteView() {
       const blendshapes = results.faceBlendshapes[0].categories;
       const jawOpen = blendshapes.find(b => b.categoryName === "jawOpen")?.score || 0;
 
-      // Si la apertura de mandíbula es mayor a 0.15
       if (jawOpen > 0.15) {
         setIsLivenessPassed(true);
         stopCamera();
-        
-        // ¡Magia! Llamamos a la criptografía pasándole el ID de la orden activa
         if (activeOrderId) {
           await generateAndSendSignature(activeOrderId);
         }
@@ -204,6 +227,7 @@ function PacienteView() {
     }
   };
 
+  // --- Lógica del Botón Manual (Intacta) ---
   const toggleRecording = async () => {
     if (isRecording && mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
@@ -238,6 +262,126 @@ function PacienteView() {
     } catch (error) {
       console.error(error);
       alert("Error al acceder al micrófono. Verifica los permisos.");
+    }
+  };
+
+  // --- Lógica de VAD (Manos Libres) ---
+  const handleVadAudio = (stream: MediaStream) => {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const audioContext = new AudioContextClass();
+    const analyser = audioContext.createAnalyser();
+    const source = audioContext.createMediaStreamSource(stream);
+    
+    source.connect(analyser);
+    analyser.fftSize = 256;
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    audioContextRef.current = audioContext;
+    analyserRef.current = analyser;
+
+    const checkAudioLevel = () => {
+      if (!isAutoModeRef.current) return;
+      
+      analyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / bufferLength;
+
+      if (average > 45) { // Umbral de ruido (Threshold)
+        if (!isSpeakingRef.current) {
+          isSpeakingRef.current = true;
+          setVadStatus("🗣️ Te escucho...");
+          
+          if (silenceTimeoutRef.current) {
+            clearTimeout(silenceTimeoutRef.current);
+            silenceTimeoutRef.current = null;
+          }
+
+          // Iniciar grabadora oculta
+          if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') {
+            const mediaRecorder = new MediaRecorder(stream);
+            mediaRecorderRef.current = mediaRecorder;
+            audioChunksRef.current = [];
+            
+            mediaRecorder.ondataavailable = (event) => {
+              if (event.data.size > 0) audioChunksRef.current.push(event.data);
+            };
+            
+            mediaRecorder.onstop = () => {
+              const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+              const reader = new FileReader();
+              reader.readAsDataURL(audioBlob);
+              reader.onloadend = () => {
+                if (reader.result) {
+                  const base64Audio = (reader.result as string).split(',')[1];
+                  sendAudioAction(base64Audio);
+                }
+              };
+            };
+            mediaRecorder.start();
+          }
+        } else {
+          // Si sigue hablando, cancela el temporizador de silencio
+          if (silenceTimeoutRef.current) {
+            clearTimeout(silenceTimeoutRef.current);
+            silenceTimeoutRef.current = null;
+          }
+        }
+      } else {
+        // Silencio detectado
+        if (isSpeakingRef.current) {
+          if (!silenceTimeoutRef.current) {
+            // Cuenta regresiva de 1.5 segundos
+            silenceTimeoutRef.current = setTimeout(() => {
+              isSpeakingRef.current = false;
+              setVadStatus("⏳ Procesando...");
+              
+              if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                mediaRecorderRef.current.stop();
+              }
+              
+              setTimeout(() => {
+                if (isAutoModeRef.current) setVadStatus("👂 Esperando en silencio...");
+              }, 1000);
+            }, 1500); 
+          }
+        }
+      }
+      loopRef.current = requestAnimationFrame(checkAudioLevel);
+    };
+    checkAudioLevel();
+  };
+
+  const toggleAutoMode = async () => {
+    if (isAutoMode) {
+      // Apagar Manos Libres
+      setIsAutoMode(false);
+      isAutoModeRef.current = false;
+      setVadStatus("Inactivo");
+      if (loopRef.current) cancelAnimationFrame(loopRef.current);
+      if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      if (audioContextRef.current) audioContextRef.current.close();
+      if (vadStreamRef.current) vadStreamRef.current.getTracks().forEach(t => t.stop());
+      isSpeakingRef.current = false;
+    } else {
+      // Encender Manos Libres
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        vadStreamRef.current = stream;
+        setIsAutoMode(true);
+        isAutoModeRef.current = true;
+        setVadStatus("👂 Esperando en silencio...");
+        handleVadAudio(stream);
+      } catch (error) {
+        console.error(error);
+        alert("Error al acceder al micrófono para el modo automático.");
+      }
     }
   };
 
@@ -283,24 +427,47 @@ function PacienteView() {
               border: msg.sender === 'system-message' ? '1px dashed #ccc' : 'none'
             }}>
               <strong>{msg.sender === 'ai-message' ? 'AiVi: ' : msg.sender === 'user-message' ? 'Tú: ' : ''}</strong>
-              {msg.text}
+              {msg.text.replace(/\[TRIGGER_CAMERA_[a-zA-Z0-9-]+\]/g, '')}
             </div>
           </div>
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+      {/* Controles Híbridos */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
         <input 
           type="text" value={inputText} onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSendText()}
           placeholder="Escribe o habla con AiVi..."
-          style={{ flex: 1, padding: '12px', borderRadius: '4px', border: '1px solid #ccc' }}
+          style={{ flex: 1, padding: '12px', borderRadius: '4px', border: '1px solid #ccc', minWidth: '200px' }}
         />
         <button onClick={handleSendText} disabled={!isConnected} style={{ padding: '12px 20px' }}>Enviar</button>
-        <button onClick={toggleRecording} disabled={!isConnected} style={{ padding: '12px 20px', backgroundColor: isRecording ? '#dc3545' : '#6c757d', color: 'white', border: 'none', borderRadius: '4px' }}>
+        
+        {/* Botón Manual Clásico */}
+        <button 
+          onClick={toggleRecording} 
+          disabled={!isConnected || isAutoMode} 
+          style={{ padding: '12px 20px', backgroundColor: isRecording ? '#dc3545' : '#6c757d', color: 'white', border: 'none', borderRadius: '4px', opacity: isAutoMode ? 0.5 : 1 }}
+        >
           {isRecording ? "⏹️ Detener" : "🎙️ Hablar"}
         </button>
+
+        {/* Nuevo Botón Manos Libres */}
+        <button 
+          onClick={toggleAutoMode} 
+          disabled={!isConnected || isRecording} 
+          style={{ padding: '12px 20px', backgroundColor: isAutoMode ? '#198754' : '#0dcaf0', color: isAutoMode ? 'white' : 'black', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}
+        >
+          {isAutoMode ? "🎧 Manos Libres ON" : "🎧 Manos Libres OFF"}
+        </button>
       </div>
+
+      {/* Indicador Visual de VAD */}
+      {isAutoMode && (
+        <div style={{ marginBottom: '20px', padding: '10px', backgroundColor: '#e2e3e5', borderRadius: '8px', textAlign: 'center', fontWeight: 'bold' }}>
+          Estado IA: <span style={{ color: isSpeakingRef.current ? '#198754' : '#6c757d' }}>{vadStatus}</span>
+        </div>
+      )}
 
       <div style={{ borderTop: '2px solid #ccc', paddingTop: '15px' }}>
         <h3>📦 Estado de mis Medicamentos</h3>
@@ -333,7 +500,7 @@ function PacienteView() {
           </ul>
         )}
 
-        {/* ZONA DE CÁMARA (FUERA DEL BUCLE) */}
+        {/* ZONA DE CÁMARA */}
         <div style={{ 
           display: isCameraActive ? 'block' : 'none', 
           marginTop: '20px', border: '2px dashed #0dcaf0', padding: '15px', 
