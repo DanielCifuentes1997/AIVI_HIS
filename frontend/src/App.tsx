@@ -10,22 +10,23 @@ function PacienteView() {
   } = useAiViStore();
 
   const [inputText, setInputText] = useState("");
-  const [uuidInput, setUuidInput] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [myOrders, setMyOrders] = useState<any[]>([]);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // --- Liveness Detection States ---
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [faceLandmarker, setFaceLandmarker] = useState<FaceLandmarker | null>(null);
-  const [isLivenessPassed, setIsLivenessPassed] = useState(false);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // --- VAD (Hands-Free) States & Refs ---
+  const [loginStatus, setLoginStatus] = useState("👆 Toque aquí para Iniciar Sesión");
+  const [isLoginCameraActive, setIsLoginCameraActive] = useState(false);
+  const loginVideoRef = useRef<HTMLVideoElement>(null);
+  const loginStreamRef = useRef<MediaStream | null>(null);
+
   const [isAutoMode, setIsAutoMode] = useState(false);
   const [vadStatus, setVadStatus] = useState("Inactivo");
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -36,22 +37,23 @@ function PacienteView() {
   const silenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loopRef = useRef<number | null>(null);
 
+  // Cargar el motor biométrico AL INICIO (Para que esté listo para el Login)
   useEffect(() => {
-    if (patientId && !isConnected) {
-      connectWebSocket(patientId);
-      fetchMyOrders();
-      loadBiometricModel(); 
-    }
-  }, [patientId, isConnected, connectWebSocket]);
-
-  // Limpieza de recursos VAD al desmontar
-  useEffect(() => {
+    loadBiometricModel();
     return () => {
       if (loopRef.current) cancelAnimationFrame(loopRef.current);
       if (audioContextRef.current) audioContextRef.current.close();
       if (vadStreamRef.current) vadStreamRef.current.getTracks().forEach(t => t.stop());
     };
   }, []);
+
+  // Conectar WebSockets solo después del login exitoso
+  useEffect(() => {
+    if (patientId && !isConnected) {
+      connectWebSocket(patientId);
+      fetchMyOrders();
+    }
+  }, [patientId, isConnected, connectWebSocket]);
 
   const loadBiometricModel = async () => {
     try {
@@ -73,7 +75,156 @@ function PacienteView() {
     }
   };
 
-  // Comandos de voz
+  const startVoiceLogin = () => {
+    const synth = window.speechSynthesis;
+    synth.cancel(); // Limpiar cualquier voz trabada de antes
+
+    const utterance = new SpeechSynthesisUtterance("Bienvenido a Ai-vi H I S. ¿Deseas iniciar sesión? Di Sí.");
+    utterance.lang = 'es-ES';
+    
+    // Hack para evitar que el navegador borre la voz de la memoria (Garbage Collection bug)
+    (window as any).bgUtterance = utterance; 
+
+    utterance.onend = () => {
+      setLoginStatus("🎤 Escuchando tu respuesta...");
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        alert("Tu navegador no soporta reconocimiento de voz nativo.");
+        return;
+      }
+      
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'es-ES';
+      recognition.interimResults = false;
+      
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript.toLowerCase();
+        console.log("Micrófono escuchó:", transcript); // Para que veas en consola (F12) qué escuchó exactamente
+        
+        if (transcript.includes("sí") || transcript.includes("si") || transcript.includes("yes")) {
+          setLoginStatus("📸 Abriendo cámara...");
+          
+          const ackUtterance = new SpeechSynthesisUtterance("Perfecto. Por favor, mire a la cámara y abra la boca para verificar su identidad.");
+          ackUtterance.lang = 'es-ES';
+          (window as any).bgAck = ackUtterance;
+          synth.speak(ackUtterance);
+          
+          // SOLUCIÓN 1: Abrir la cámara inmediatamente, no esperar a que termine de hablar
+          startLoginCamera(); 
+        } else {
+          setLoginStatus(`Entendió "${transcript}". Toque para reintentar.`);
+        }
+      };
+
+      // SOLUCIÓN 2: Si el micrófono se apaga por silencio, actualizar la pantalla
+      recognition.onend = () => {
+        setLoginStatus(prev => 
+          prev === "🎤 Escuchando tu respuesta..." 
+            ? "⏱️ Silencio detectado. Toque aquí para reintentar." 
+            : prev
+        );
+      };
+
+      recognition.onerror = (e: any) => {
+        console.error("Error de mic:", e.error);
+        setLoginStatus("👆 Error al escuchar. Toque para reintentar.");
+      };
+      
+      recognition.start();
+    };
+    synth.speak(utterance);
+  };
+
+  const startLoginCamera = async () => {
+    if (!faceLandmarker) {
+      setLoginStatus("Cargando IA Visual... un momento.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (loginVideoRef.current) {
+        loginVideoRef.current.srcObject = stream;
+        loginStreamRef.current = stream;
+        loginVideoRef.current.addEventListener("loadeddata", predictLoginWebcam);
+        setIsLoginCameraActive(true);
+        setLoginStatus("Mire la cámara y ABRA LA BOCA...");
+      }
+    } catch (e) {
+      console.error(e);
+      setLoginStatus("Error al acceder a la cámara.");
+    }
+  };
+
+  const predictLoginWebcam = async () => {
+    if (!loginVideoRef.current || !faceLandmarker) return;
+    const startTimeMs = performance.now();
+    const results = faceLandmarker.detectForVideo(loginVideoRef.current, startTimeMs);
+
+    // Verificamos que existan datos de estructura (Landmarks) y expresiones (Blendshapes)
+    if (results.faceBlendshapes && results.faceBlendshapes.length > 0 && results.faceLandmarks && results.faceLandmarks.length > 0) {
+      const blendshapes = results.faceBlendshapes[0].categories;
+      const jawOpen = blendshapes.find(b => b.categoryName === "jawOpen")?.score || 0;
+
+      // PRUEBA DE VIDA (Evita la trampa de la foto)
+      if (jawOpen > 0.15) {
+        const faceMesh = results.faceLandmarks[0]; // La huella 3D
+        
+        // Detener cámara
+        if (loginStreamRef.current) {
+          loginStreamRef.current.getTracks().forEach(t => t.stop());
+          loginStreamRef.current = null;
+        }
+        setIsLoginCameraActive(false);
+        setLoginStatus("⏳ Verificando identidad en el servidor...");
+
+        try {
+          const response = await fetch('http://localhost:8000/api/auth/biometric', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ biometric_landmarks: faceMesh })
+          });
+          
+if (response.ok) {
+            const data = await response.json();
+            const synth = window.speechSynthesis;
+            const msg = new SpeechSynthesisUtterance(`Bienvenido de nuevo, ${data.first_name}`);
+            msg.lang = 'es-ES';
+          
+            synth.speak(msg);
+            
+            setLoginStatus(`✅ ¡Match Exitoso! Hola ${data.first_name}`);
+            
+            msg.onend = () => {
+                setPatientId(data.patient_id); // LOG IN EXITOSO
+            };
+            
+            setTimeout(() => {
+                setPatientId(data.patient_id); 
+            }, 3500);
+
+            return;
+          } else {
+            setLoginStatus("❌ Rostro no reconocido. Toque para intentar de nuevo.");
+            const synth = window.speechSynthesis;
+            const msg = new SpeechSynthesisUtterance("Lo siento, tu rostro no coincide con nuestros registros.");
+            msg.lang = 'es-ES';
+            synth.speak(msg);
+            return;
+          }
+        } catch (err) {
+          console.error(err);
+          setLoginStatus("Error de conexión con el servidor.");
+          return;
+        }
+      }
+    }
+
+    if (loginStreamRef.current) {
+      window.requestAnimationFrame(predictLoginWebcam);
+    }
+  };
+
+  // Comandos de voz (Apertura de cámara de farmacia oculta)
   useEffect(() => {
     if (messages.length > 0) {
       const lastMsg = messages[messages.length - 1];
@@ -100,14 +251,13 @@ function PacienteView() {
     }
   };
 
-  // --- Biometric Flow ---
+  // --- Biometric Flow (Firma en Farmacia) ---
   const startLivenessCheck = async (orderId: string) => {
     if (!faceLandmarker) {
       alert("El motor biométrico aún se está cargando. Intenta en un momento.");
       return;
     }
     setActiveOrderId(orderId);
-    setIsLivenessPassed(false);
     
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -168,14 +318,10 @@ function PacienteView() {
       
       const jwsToken = `${dataToSign}.${signatureBase64Url}`;
 
-      console.log("Token JWS Generado (Edge):", jwsToken);
       const response = await fetch(`http://localhost:8000/api/prescriptions/${orderId}/sign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          jws_token: jwsToken, 
-          liveness_status: "passed" 
-        })
+        body: JSON.stringify({ jws_token: jwsToken, liveness_status: "passed" })
       });
 
       if (response.ok) {
@@ -200,7 +346,6 @@ function PacienteView() {
       const jawOpen = blendshapes.find(b => b.categoryName === "jawOpen")?.score || 0;
 
       if (jawOpen > 0.15) {
-        setIsLivenessPassed(true);
         stopCamera();
         if (activeOrderId) {
           await generateAndSendSignature(activeOrderId);
@@ -221,13 +366,6 @@ function PacienteView() {
     }
   };
 
-  const handleLogin = () => {
-    if (uuidInput.trim()) {
-      setPatientId(uuidInput.trim());
-    }
-  };
-
-  // --- Lógica del Botón Manual (Intacta) ---
   const toggleRecording = async () => {
     if (isRecording && mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
@@ -261,11 +399,10 @@ function PacienteView() {
       setIsRecording(true);
     } catch (error) {
       console.error(error);
-      alert("Error al acceder al micrófono. Verifica los permisos.");
+      alert("Error al acceder al micrófono.");
     }
   };
 
-  // --- Lógica de VAD (Manos Libres) ---
   const handleVadAudio = (stream: MediaStream) => {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     const audioContext = new AudioContextClass();
@@ -281,7 +418,7 @@ function PacienteView() {
     analyserRef.current = analyser;
 
     const checkAudioLevel = () => {
-      if (!isAutoModeRef.current) return;
+      if (!isAutoModeRef.current) return; 
       
       analyser.getByteFrequencyData(dataArray);
       let sum = 0;
@@ -290,7 +427,7 @@ function PacienteView() {
       }
       const average = sum / bufferLength;
 
-      if (average > 45) { // Umbral de ruido (Threshold)
+      if (average > 35) { 
         if (!isSpeakingRef.current) {
           isSpeakingRef.current = true;
           setVadStatus("🗣️ Te escucho...");
@@ -300,7 +437,6 @@ function PacienteView() {
             silenceTimeoutRef.current = null;
           }
 
-          // Iniciar grabadora oculta
           if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') {
             const mediaRecorder = new MediaRecorder(stream);
             mediaRecorderRef.current = mediaRecorder;
@@ -324,17 +460,14 @@ function PacienteView() {
             mediaRecorder.start();
           }
         } else {
-          // Si sigue hablando, cancela el temporizador de silencio
           if (silenceTimeoutRef.current) {
             clearTimeout(silenceTimeoutRef.current);
             silenceTimeoutRef.current = null;
           }
         }
       } else {
-        // Silencio detectado
         if (isSpeakingRef.current) {
           if (!silenceTimeoutRef.current) {
-            // Cuenta regresiva de 1.5 segundos
             silenceTimeoutRef.current = setTimeout(() => {
               isSpeakingRef.current = false;
               setVadStatus("⏳ Procesando...");
@@ -357,7 +490,6 @@ function PacienteView() {
 
   const toggleAutoMode = async () => {
     if (isAutoMode) {
-      // Apagar Manos Libres
       setIsAutoMode(false);
       isAutoModeRef.current = false;
       setVadStatus("Inactivo");
@@ -370,7 +502,6 @@ function PacienteView() {
       if (vadStreamRef.current) vadStreamRef.current.getTracks().forEach(t => t.stop());
       isSpeakingRef.current = false;
     } else {
-      // Encender Manos Libres
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         vadStreamRef.current = stream;
@@ -380,29 +511,43 @@ function PacienteView() {
         handleVadAudio(stream);
       } catch (error) {
         console.error(error);
-        alert("Error al acceder al micrófono para el modo automático.");
+        alert("Error al acceder al micrófono.");
       }
     }
   };
 
   if (!patientId) {
     return (
-      <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
-        <h1>AiVi - Acceso de Paciente</h1>
-        <p>Ingresa el UUID del paciente:</p>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <input 
-            type="text" value={uuidInput} onChange={(e) => setUuidInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-            placeholder="Ej: 5452f5a0-fd32-4f95-8152-..."
-            style={{ padding: '10px', width: '300px' }}
-          />
-          <button onClick={handleLogin} style={{ padding: '10px' }}>Ingresar</button>
+      <div style={{ padding: '20px', fontFamily: 'sans-serif', textAlign: 'center', marginTop: '50px' }}>
+        <h1>AiVi - Acceso Inclusivo</h1>
+        <p>Sistema de reconocimiento facial para pacientes.</p>
+        
+        {/* Botón inicial (se oculta con CSS cuando la cámara se activa) */}
+        <div 
+          onClick={startVoiceLogin} 
+          style={{ 
+            padding: '40px', backgroundColor: '#0dcaf0', borderRadius: '15px', 
+            cursor: 'pointer', fontSize: '20px', fontWeight: 'bold', margin: '30px auto', maxWidth: '400px',
+            color: 'black', boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+            display: isLoginCameraActive ? 'none' : 'block'
+          }}
+        >
+          {loginStatus}
+        </div>
+
+        {/* Zona de Cámara (Siempre existe en el código, se muestra con CSS) */}
+        <div style={{ 
+          border: '3px dashed #0dcaf0', padding: '15px', borderRadius: '8px', backgroundColor: '#f8f9fa',
+          display: isLoginCameraActive ? 'inline-block' : 'none' 
+        }}>
+          <p style={{ fontSize: '18px', fontWeight: 'bold', color: '#dc3545' }}>{loginStatus}</p>
+          <video ref={loginVideoRef} autoPlay playsInline style={{ width: '100%', maxWidth: '350px', transform: 'scaleX(-1)', borderRadius: '8px' }}></video>
         </div>
       </div>
     );
   }
 
+  // --- VISTA DESPUÉS DE INICIAR SESIÓN ---
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -433,7 +578,6 @@ function PacienteView() {
         ))}
       </div>
 
-      {/* Controles Híbridos */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
         <input 
           type="text" value={inputText} onChange={(e) => setInputText(e.target.value)}
@@ -443,7 +587,6 @@ function PacienteView() {
         />
         <button onClick={handleSendText} disabled={!isConnected} style={{ padding: '12px 20px' }}>Enviar</button>
         
-        {/* Botón Manual Clásico */}
         <button 
           onClick={toggleRecording} 
           disabled={!isConnected || isAutoMode} 
@@ -452,7 +595,6 @@ function PacienteView() {
           {isRecording ? "⏹️ Detener" : "🎙️ Hablar"}
         </button>
 
-        {/* Nuevo Botón Manos Libres */}
         <button 
           onClick={toggleAutoMode} 
           disabled={!isConnected || isRecording} 
@@ -462,7 +604,6 @@ function PacienteView() {
         </button>
       </div>
 
-      {/* Indicador Visual de VAD */}
       {isAutoMode && (
         <div style={{ marginBottom: '20px', padding: '10px', backgroundColor: '#e2e3e5', borderRadius: '8px', textAlign: 'center', fontWeight: 'bold' }}>
           Estado IA: <span style={{ color: isSpeakingRef.current ? '#198754' : '#6c757d' }}>{vadStatus}</span>
@@ -500,7 +641,6 @@ function PacienteView() {
           </ul>
         )}
 
-        {/* ZONA DE CÁMARA */}
         <div style={{ 
           display: isCameraActive ? 'block' : 'none', 
           marginTop: '20px', border: '2px dashed #0dcaf0', padding: '15px', 
@@ -679,8 +819,9 @@ function AdminView() {
     const startTimeMs = performance.now();
     const results = faceLandmarker.detectForVideo(videoRef.current, startTimeMs);
 
-    if (results.faceBlendshapes && results.faceBlendshapes.length > 0) {
-      setFormData(prev => ({ ...prev, biometric_landmarks: results.faceBlendshapes[0].categories }));
+    if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+      const faceMesh = results.faceLandmarks[0];
+      setFormData(prev => ({ ...prev, biometric_landmarks: faceMesh }));
       stopCamera();
     } else {
       if (streamRef.current) {
@@ -702,7 +843,6 @@ function AdminView() {
         body: JSON.stringify(formData)
       });
       const res = await response.json();
-      console.log("Respuesta del servidor:", res);
       
       if (response.ok) {
         alert(`Paciente creado en la BD. UUID: ${res.patient_id}.`);
@@ -788,7 +928,7 @@ function FarmaciaView() {
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '800px', margin: '0 auto' }}>
       <h2>Tablero de Control de Farmacia</h2>
-      <p>Muestra las recetas que los pacientes ya autorizaron con su firma electrónica (Delivery status != pending).</p>
+      <p>Muestra las recetas que los pacientes ya autorizaron con su firma electrónica.</p>
       <button onClick={fetchOrders} style={{ marginBottom: '15px', padding: '8px' }}>Refrescar Tablero</button>
       
       {orders.length === 0 ? <p>No hay órdenes autorizadas para despacho en este momento.</p> : (

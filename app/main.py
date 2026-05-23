@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime
-from passlib.context import CryptContext
+import bcrypt
+import math
 
 from sqlalchemy.future import select
 from app.infrastructure.database import AsyncSessionLocal
@@ -13,7 +14,6 @@ from app.domain.models import User, Patient, ClinicalRecord, Prescription, Appoi
 from app.infrastructure.config import settings
 from app.presentation.websocket import router as websocket_router
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 app = FastAPI(title="AiVi MVP API")
 
@@ -50,6 +50,22 @@ class SignatureSchema(BaseModel):
     jws_token: str
     liveness_status: str
 
+class BiometricLoginSchema(BaseModel):
+    biometric_landmarks: list
+
+def calculate_euclidean_distance(points1, points2):
+    if not points1 or not points2 or len(points1) != len(points2):
+        return float('inf')
+    
+    total_distance = 0
+    for p1, p2 in zip(points1, points2):
+        dx = p1.get('x', 0) - p2.get('x', 0)
+        dy = p1.get('y', 0) - p2.get('y', 0)
+        dz = p1.get('z', 0) - p2.get('z', 0)
+        total_distance += math.sqrt(dx*dx + dy*dy + dz*dz)
+    
+    return total_distance / len(points1)
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
@@ -66,7 +82,8 @@ async def create_patient(data: PatientCreateSchema):
             if doc_check.scalars().first():
                 raise HTTPException(status_code=400, detail="El documento de identidad ya esta registrado")
 
-            hashed_pw = pwd_context.hash(settings.DEFAULT_PATIENT_PASSWORD)
+            password_bytes = settings.DEFAULT_PATIENT_PASSWORD.encode('utf-8')
+            hashed_pw = bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode('utf-8')
             new_user = User(
                 email=data.email,
                 hashed_password=hashed_pw,
@@ -103,7 +120,7 @@ async def create_medical_consultation(data: ConsultationSchema):
             if not doctor:
                 doctor = User(
                     email=mock_doctor_email,
-                    hashed_password=pwd_context.hash(settings.DEFAULT_DOCTOR_PASSWORD),
+                    hashed_password=bcrypt.hashpw(settings.DEFAULT_DOCTOR_PASSWORD.encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
                     role="doctor",
                     first_name="Médico",
                     last_name="De Prueba"
@@ -187,7 +204,6 @@ async def update_order_status(order_id: str, data: OrderStatusUpdateSchema):
 async def sign_prescription(order_id: str, data: SignatureSchema):
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            # 1. Buscar la receta pendiente
             stmt = select(Prescription).where(Prescription.id == order_id)
             result = await session.execute(stmt)
             prescription = result.scalars().first()
@@ -213,3 +229,49 @@ async def sign_prescription(order_id: str, data: SignatureSchema):
             prescription.delivery_status = "autorizada"
             
             return {"status": "success", "message": "Firma electrónica validada. Medicamento autorizado."}
+
+@app.post("/api/auth/biometric")
+async def biometric_login(data: BiometricLoginSchema):
+    live_landmarks = data.biometric_landmarks
+    if not live_landmarks or len(live_landmarks) == 0:
+        raise HTTPException(status_code=400, detail="No se detectaron puntos faciales")
+
+    async with AsyncSessionLocal() as session:
+        stmt = select(Patient, User).join(User, Patient.user_id == User.id)
+        result = await session.execute(stmt)
+        records = result.all()
+
+        best_match = None
+        lowest_distance = float('inf')
+        
+        THRESHOLD = 0.15 
+
+        for patient, user in records:
+            stored_landmarks = patient.biometric_landmarks
+            
+            if not stored_landmarks or isinstance(stored_landmarks, dict):
+                continue
+            if len(stored_landmarks) > 0 and 'categoryName' in stored_landmarks[0]:
+                continue
+            
+            dist = calculate_euclidean_distance(live_landmarks, stored_landmarks)
+            
+            # 2. Espía en la terminal para ver el número exacto
+            print(f"Probando con paciente {user.first_name}... Distancia: {dist}")
+            
+            if dist < lowest_distance:
+                lowest_distance = dist
+                best_match = (patient, user)
+
+        print(f"--- MEJOR COINCIDENCIA FINAL: {lowest_distance} ---")
+
+        if best_match and lowest_distance < THRESHOLD:
+            matched_patient, matched_user = best_match
+            return {
+                "status": "success", 
+                "patient_id": matched_patient.id,
+                "first_name": matched_user.first_name,
+                "distance": lowest_distance
+            }
+        
+        raise HTTPException(status_code=401, detail="Rostro no reconocido o no registrado en el sistema")

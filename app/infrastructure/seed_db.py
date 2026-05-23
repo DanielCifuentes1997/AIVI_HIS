@@ -14,60 +14,7 @@ async def seed_data():
             last_name="Mendoza",
             phone="+573001234567"
         )
-        
-        # Añadimos los datos de identidad reales para Elena
-        patient_user = User(
-            email="elena@aivi.com", 
-            hashed_password="hashed_pwd", 
-            role="patient",
-            first_name="Elena",
-            last_name="Giraldo",
-            phone="+573119876543"
-        )
-        
-        session.add_all([doc_user, patient_user])
-        await session.flush()
-
-        patient_profile = Patient(
-            user_id=patient_user.id,
-            document_id="123456789",
-            blood_type="O+",
-            address="Calle 123, Armenia, Quindío",
-            biometric_landmarks={}
-        )
-        session.add(patient_profile)
-        await session.flush()
-
-        record = ClinicalRecord(
-            patient_id=patient_profile.id,
-            doctor_id=doc_user.id,
-            record_data={
-                "diagnosis": "Hipertensión Arterial Controlada",
-                "notes": "Paciente acude a control de rutina. Presión arterial estable. Continuar medicación.",
-                "allergies": ["Penicilina"]
-            }
-        )
-        
-        appointment = Appointment(
-            patient_id=patient_profile.id,
-            doctor_id=doc_user.id,
-            date_time=datetime.utcnow() + timedelta(days=2),
-            status="scheduled",
-            recommendations="Llegar 15 minutos antes. Asistir en ayunas."
-        )
-
-        prescription = Prescription(
-            patient_id=patient_profile.id,
-            doctor_id=doc_user.id,
-            delivery_status="pending",
-            prescription_data={
-                "medications": [
-                    {"name": "Losartán", "dose": "50mg", "frequency": "1 cada 12 horas"}
-                ]
-            }
-        )
-
-        session.add_all([record, appointment, prescription])
+        session.add(doc_user)
         await session.commit()
 
 if __name__ == "__main__":
