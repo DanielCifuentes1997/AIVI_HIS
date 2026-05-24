@@ -9,3 +9,4 @@ langgraph
 langchain-google-genai
 langchain-core
 redis
+bcrypt
