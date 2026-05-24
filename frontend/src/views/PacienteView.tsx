@@ -178,7 +178,8 @@ export default function PacienteView() {
         setLoginStatus("⏳ Verificando identidad en el servidor...");
 
         try {
-          const response = await fetch('http://localhost:8000/api/auth/biometric', {
+          const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+          const response = await fetch(`${apiUrl}/api/auth/biometric`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ biometric_landmarks: faceMesh })
@@ -241,7 +242,8 @@ if (response.ok) {
   const fetchMyOrders = async () => {
     if (!patientId) return;
     try {
-      const response = await fetch(`http://localhost:8000/api/patients/${patientId}/prescriptions`);
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/patients/${patientId}/prescriptions`);
       if (response.ok) {
         const data = await response.json();
         setMyOrders(data);
@@ -318,7 +320,8 @@ if (response.ok) {
       
       const jwsToken = `${dataToSign}.${signatureBase64Url}`;
 
-      const response = await fetch(`http://localhost:8000/api/prescriptions/${orderId}/sign`, {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/prescriptions/${orderId}/sign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jws_token: jwsToken, liveness_status: "passed" })

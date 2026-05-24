@@ -6,7 +6,8 @@ export default function FarmaciaView() {
 
   const fetchOrders = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/farmacia/orders');
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/farmacia/orders`);
       if (response.ok) {
         const data = await response.json();
         setOrders(data);
@@ -24,7 +25,8 @@ export default function FarmaciaView() {
 
   const updateStatus = async (orderId: string, status: 'alistando' | 'despacho') => {
     try {
-      const response = await fetch(`http://localhost:8000/api/farmacia/orders/${orderId}`, {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/farmacia/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ delivery_status: status })

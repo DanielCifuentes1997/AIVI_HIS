@@ -39,7 +39,8 @@ export const useAiViStore = create<AiViState>((set, get) => ({
     const currentWs = get().ws;
     if (currentWs && currentWs.readyState === WebSocket.OPEN) return;
 
-    const ws = new WebSocket(`ws://localhost:8000/ws/${id}`);
+    const wsBaseUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000";
+    const ws = new WebSocket(`${wsBaseUrl}/ws/${id}`);
 
     ws.onopen = () => {
       set({ isConnected: true, ws });
