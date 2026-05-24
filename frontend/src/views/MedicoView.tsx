@@ -52,45 +52,129 @@ export default function MedicoView() {
   };
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto' }}>
-      <h2>Interfaz Médica (Data Estructurada)</h2>
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-        <div style={{ border: '1px solid #ccc', padding: '10px' }}>
-          <h3>1. Selección de Paciente</h3>
-          <input placeholder="UUID del Paciente" required value={patientId} onChange={e => setPatientId(e.target.value)} style={{ padding: '8px', width: '100%' }}/>
+    <div className="w-full max-w-3xl mx-auto bg-aivi-panel p-6 sm:p-8 rounded-xl shadow-2xl border border-gray-800 mt-4">
+      <h2 className="text-2xl font-bold text-aivi-gold mb-6 border-b border-gray-700 pb-4">
+        Interfaz Médica (Data Estructurada)
+      </h2>
+      
+      <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+        
+        {/* 1. Selección de Paciente */}
+        <div className="bg-black/40 border border-gray-700 p-5 rounded-lg">
+          <h3 className="text-lg font-semibold text-gray-300 mb-3 flex items-center gap-2">
+            <span className="bg-gray-800 text-aivi-gold px-2 py-0.5 rounded text-sm">1</span> 
+            Selección de Paciente
+          </h3>
+          <input 
+            placeholder="UUID del Paciente" required value={patientId} 
+            onChange={e => setPatientId(e.target.value)} 
+            className="w-full bg-black border border-gray-600 rounded-lg p-3 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-aivi-gold focus:ring-1 focus:ring-aivi-gold transition-colors"
+          />
         </div>
         
-        <div style={{ border: '1px solid #ccc', padding: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <h3>2. Historia Clínica (JSONB)</h3>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <input placeholder="Peso (kg)" value={recordData.weight} onChange={e => setRecordData({...recordData, weight: e.target.value})} style={{ padding: '8px', flex: 1 }}/>
-            <input placeholder="Talla (cm)" value={recordData.height} onChange={e => setRecordData({...recordData, height: e.target.value})} style={{ padding: '8px', flex: 1 }}/>
+        {/* 2. Historia Clínica */}
+        <div className="bg-black/40 border border-gray-700 p-5 rounded-lg flex flex-col gap-4">
+          <h3 className="text-lg font-semibold text-gray-300 flex items-center gap-2">
+            <span className="bg-gray-800 text-aivi-gold px-2 py-0.5 rounded text-sm">2</span> 
+            Historia Clínica (JSONB)
+          </h3>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <input 
+              placeholder="Peso (kg)" value={recordData.weight} 
+              onChange={e => setRecordData({...recordData, weight: e.target.value})} 
+              className="flex-1 bg-black border border-gray-600 rounded-lg p-3 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-aivi-gold focus:ring-1 focus:ring-aivi-gold transition-colors"
+            />
+            <input 
+              placeholder="Talla (cm)" value={recordData.height} 
+              onChange={e => setRecordData({...recordData, height: e.target.value})} 
+              className="flex-1 bg-black border border-gray-600 rounded-lg p-3 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-aivi-gold focus:ring-1 focus:ring-aivi-gold transition-colors"
+            />
           </div>
-          <input placeholder="Motivo de consulta" required value={recordData.reason} onChange={e => setRecordData({...recordData, reason: e.target.value})} style={{ padding: '8px' }}/>
-          <textarea placeholder="Diagnóstico" required value={recordData.diagnosis} onChange={e => setRecordData({...recordData, diagnosis: e.target.value})} style={{ padding: '8px', minHeight: '60px' }}/>
+          <input 
+            placeholder="Motivo de consulta" required value={recordData.reason} 
+            onChange={e => setRecordData({...recordData, reason: e.target.value})} 
+            className="w-full bg-black border border-gray-600 rounded-lg p-3 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-aivi-gold focus:ring-1 focus:ring-aivi-gold transition-colors"
+          />
+          <textarea 
+            placeholder="Diagnóstico" required value={recordData.diagnosis} 
+            onChange={e => setRecordData({...recordData, diagnosis: e.target.value})} 
+            className="w-full bg-black border border-gray-600 rounded-lg p-3 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-aivi-gold focus:ring-1 focus:ring-aivi-gold transition-colors min-h-[80px] resize-y"
+          />
         </div>
 
-        <div style={{ border: '1px solid #ccc', padding: '10px' }}>
-          <h3>3. Prescripción Médica (Estructurada)</h3>
-          {medications.map((med, index) => (
-            <div key={index} style={{ display: 'flex', gap: '5px', marginBottom: '10px', alignItems: 'center' }}>
-              <input placeholder="Medicamento (Ej: Ibuprofeno)" value={med.name} onChange={e => handleMedChange(index, 'name', e.target.value)} style={{ padding: '8px', flex: 1 }} />
-              <input placeholder="Dosis (Ej: 400mg)" value={med.dose} onChange={e => handleMedChange(index, 'dose', e.target.value)} style={{ padding: '8px', width: '100px' }} />
-              <input placeholder="Frecuencia (Ej: Cada 8h)" value={med.frequency} onChange={e => handleMedChange(index, 'frequency', e.target.value)} style={{ padding: '8px', width: '120px' }} />
-              {medications.length > 1 && (
-                <button type="button" onClick={() => removeMedication(index)} style={{ padding: '8px', backgroundColor: 'red', color: 'white', border: 'none', cursor: 'pointer' }}>X</button>
-              )}
-            </div>
-          ))}
-          <button type="button" onClick={addMedication} style={{ padding: '8px', backgroundColor: '#007bff', color: 'white', border: 'none', cursor: 'pointer' }}>+ Agregar Medicamento</button>
+        {/* 3. Prescripción Médica */}
+        <div className="bg-black/40 border border-gray-700 p-5 rounded-lg">
+          <h3 className="text-lg font-semibold text-gray-300 mb-4 flex items-center gap-2">
+            <span className="bg-gray-800 text-aivi-gold px-2 py-0.5 rounded text-sm">3</span> 
+            Prescripción Médica (Estructurada)
+          </h3>
+          
+          <div className="flex flex-col gap-3 mb-4">
+            {medications.map((med, index) => (
+              <div key={index} className="flex flex-col sm:flex-row gap-2 items-center bg-gray-900/50 p-2 rounded-lg border border-gray-800">
+                <input 
+                  placeholder="Medicamento (Ej: Ibuprofeno)" value={med.name} 
+                  onChange={e => handleMedChange(index, 'name', e.target.value)} 
+                  className="w-full sm:flex-1 bg-black border border-gray-600 rounded-lg p-3 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-aivi-gold focus:ring-1 focus:ring-aivi-gold transition-colors" 
+                />
+                <input 
+                  placeholder="Dosis (Ej: 400mg)" value={med.dose} 
+                  onChange={e => handleMedChange(index, 'dose', e.target.value)} 
+                  className="w-full sm:w-32 bg-black border border-gray-600 rounded-lg p-3 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-aivi-gold focus:ring-1 focus:ring-aivi-gold transition-colors" 
+                />
+                <input 
+                  placeholder="Frecuencia (Ej: Cada 8h)" value={med.frequency} 
+                  onChange={e => handleMedChange(index, 'frequency', e.target.value)} 
+                  className="w-full sm:w-40 bg-black border border-gray-600 rounded-lg p-3 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-aivi-gold focus:ring-1 focus:ring-aivi-gold transition-colors" 
+                />
+                {medications.length > 1 && (
+                  <button 
+                    type="button" onClick={() => removeMedication(index)} 
+                    className="w-full sm:w-auto px-4 py-3 bg-red-900/30 text-red-400 hover:bg-red-600 hover:text-white border border-red-900/50 rounded-lg transition-colors"
+                  >
+                    X
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          
+          <button 
+            type="button" onClick={addMedication} 
+            className="px-4 py-2 bg-gray-800 text-aivi-gold border border-gray-600 hover:border-aivi-gold rounded-lg transition-colors text-sm font-medium"
+          >
+            + Agregar Medicamento
+          </button>
         </div>
 
-        <div style={{ border: '1px solid #ccc', padding: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <h3>4. Próxima Cita (Opcional)</h3>
-          <input type="datetime-local" value={appointmentDate} onChange={e => setAppointmentDate(e.target.value)} style={{ padding: '8px' }}/>
-          <input placeholder="Recomendaciones" value={recommendations} onChange={e => setRecommendations(e.target.value)} style={{ padding: '8px' }}/>
+        {/* 4. Próxima Cita */}
+        <div className="bg-black/40 border border-gray-700 p-5 rounded-lg flex flex-col gap-4">
+          <h3 className="text-lg font-semibold text-gray-300 flex items-center gap-2">
+            <span className="bg-gray-800 text-aivi-gold px-2 py-0.5 rounded text-sm">4</span> 
+            Próxima Cita (Opcional)
+          </h3>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <input 
+              type="datetime-local" value={appointmentDate} 
+              onChange={e => setAppointmentDate(e.target.value)} 
+              className="w-full sm:w-auto bg-black border border-gray-600 rounded-lg p-3 text-gray-200 focus:outline-none focus:border-aivi-gold focus:ring-1 focus:ring-aivi-gold transition-colors [color-scheme:dark]"
+            />
+            <input 
+              placeholder="Recomendaciones" value={recommendations} 
+              onChange={e => setRecommendations(e.target.value)} 
+              className="flex-1 bg-black border border-gray-600 rounded-lg p-3 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-aivi-gold focus:ring-1 focus:ring-aivi-gold transition-colors"
+            />
+          </div>
         </div>
-        <button type="submit" style={{ padding: '12px', backgroundColor: '#28a745', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Guardar Consulta</button>
+
+        {/* Botón de Guardar (Se mantiene en verde para indicar acción médica exitosa, pero adaptado al modo oscuro) */}
+        <button 
+          type="submit" 
+          className="w-full py-4 rounded-lg font-bold text-lg transition-all duration-300 bg-green-700 hover:bg-green-600 text-white shadow-lg mt-2"
+        >
+          Guardar Consulta
+        </button>
+        
       </form>
     </div>
   );
