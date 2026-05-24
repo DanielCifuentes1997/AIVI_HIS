@@ -185,7 +185,7 @@ export default function PacienteView() {
             body: JSON.stringify({ biometric_landmarks: faceMesh })
           });
           
-if (response.ok) {
+          if (response.ok) {
             const data = await response.json();
             const synth = window.speechSynthesis;
             const msg = new SpeechSynthesisUtterance(`Bienvenido de nuevo, ${data.first_name}`);
@@ -521,30 +521,27 @@ if (response.ok) {
 
   if (!patientId) {
     return (
-      <div style={{ padding: '20px', fontFamily: 'sans-serif', textAlign: 'center', marginTop: '50px' }}>
-        <h1>AiVi - Acceso Inclusivo</h1>
-        <p>Sistema de reconocimiento facial para pacientes.</p>
+      <div className="flex flex-col items-center justify-center min-h-[70vh] p-6 text-center">
+        <h1 className="text-4xl font-bold text-aivi-gold mb-2 tracking-wide">AiVi - Acceso Inclusivo</h1>
+        <p className="text-gray-400 mb-10 text-lg">Sistema de reconocimiento facial para pacientes.</p>
         
-        {/* Botón inicial (se oculta con CSS cuando la cámara se activa) */}
+        {/* Botón inicial (se oculta con Tailwind cuando la cámara se activa) */}
         <div 
           onClick={startVoiceLogin} 
-          style={{ 
-            padding: '40px', backgroundColor: '#0dcaf0', borderRadius: '15px', 
-            cursor: 'pointer', fontSize: '20px', fontWeight: 'bold', margin: '30px auto', maxWidth: '400px',
-            color: 'black', boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-            display: isLoginCameraActive ? 'none' : 'block'
-          }}
+          className={`px-8 py-5 bg-aivi-gold text-black rounded-2xl cursor-pointer text-xl font-bold max-w-md w-full shadow-[0_0_20px_rgba(212,175,55,0.3)] hover:bg-yellow-500 hover:scale-105 transition-all duration-300 ${isLoginCameraActive ? 'hidden' : 'block'}`}
         >
           {loginStatus}
         </div>
 
-        {/* Zona de Cámara (Siempre existe en el código, se muestra con CSS) */}
-        <div style={{ 
-          border: '3px dashed #0dcaf0', padding: '15px', borderRadius: '8px', backgroundColor: '#f8f9fa',
-          display: isLoginCameraActive ? 'inline-block' : 'none' 
-        }}>
-          <p style={{ fontSize: '18px', fontWeight: 'bold', color: '#dc3545' }}>{loginStatus}</p>
-          <video ref={loginVideoRef} autoPlay playsInline style={{ width: '100%', maxWidth: '350px', transform: 'scaleX(-1)', borderRadius: '8px' }}></video>
+        {/* Zona de Cámara (Siempre existe en el código, se muestra con Tailwind) */}
+        <div className={`border-2 border-dashed border-aivi-gold/50 p-6 rounded-2xl bg-black/60 shadow-2xl flex-col items-center gap-4 ${isLoginCameraActive ? 'flex' : 'hidden'}`}>
+          <p className="text-xl font-bold text-aivi-gold animate-pulse">{loginStatus}</p>
+          <video 
+            ref={loginVideoRef} 
+            autoPlay 
+            playsInline 
+            className="w-full max-w-[350px] scale-x-[-1] rounded-xl border border-gray-800 shadow-lg object-cover"
+          ></video>
         </div>
       </div>
     );
@@ -552,48 +549,64 @@ if (response.ok) {
 
   // --- VISTA DESPUÉS DE INICIAR SESIÓN ---
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>AiVi - Asistente</h1>
-        <span style={{ fontWeight: 'bold', color: isConnected ? 'green' : 'red' }}>
+    <div className="w-full max-w-3xl mx-auto flex flex-col gap-6 p-4">
+      
+      {/* Header del Asistente */}
+      <div className="flex justify-between items-center bg-black/40 p-5 rounded-2xl border border-gray-800 shadow-md">
+        <h1 className="text-2xl font-bold text-gray-200">AiVi - Asistente</h1>
+        <span className={`font-bold px-4 py-1.5 rounded-full text-sm border shadow-inner ${isConnected ? 'bg-green-900/20 text-green-400 border-green-800/50' : 'bg-red-900/20 text-red-400 border-red-800/50'}`}>
           {isConnected ? "🟢 Conectado" : "🔴 Desconectado"}
         </span>
       </div>
       
-      <div style={{ 
-        height: '300px', overflowY: 'auto', border: '1px solid #ccc', 
-        borderRadius: '8px', padding: '15px', marginBottom: '15px', backgroundColor: '#f9f9f9'
-      }}>
+      {/* Chat Window */}
+      <div className="h-[400px] overflow-y-auto border border-gray-800 rounded-2xl p-5 bg-black/50 shadow-inner flex flex-col gap-4">
         {messages.map((msg, idx) => (
-          <div key={idx} style={{ 
-            marginBottom: '12px', textAlign: msg.sender === 'user-message' ? 'right' : 'left',
-            color: msg.sender === 'system-message' ? '#666' : '#000'
-          }}>
-            <div style={{
-              display: 'inline-block', padding: '10px 15px', borderRadius: '15px',
-              backgroundColor: msg.sender === 'user-message' ? '#d1e7dd' : msg.sender === 'ai-message' ? '#e2e3e5' : 'transparent',
-              border: msg.sender === 'system-message' ? '1px dashed #ccc' : 'none'
-            }}>
-              <strong>{msg.sender === 'ai-message' ? 'AiVi: ' : msg.sender === 'user-message' ? 'Tú: ' : ''}</strong>
-              {msg.text.replace(/\[TRIGGER_CAMERA_[a-zA-Z0-9-]+\]/g, '')}
+          <div key={idx} className={`flex w-full ${msg.sender === 'user-message' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`inline-block px-5 py-3 max-w-[85%] ${
+              msg.sender === 'user-message' 
+                ? 'bg-aivi-gold/10 text-aivi-gold border border-aivi-gold/30 rounded-2xl rounded-br-sm' 
+                : msg.sender === 'ai-message' 
+                  ? 'bg-gray-800 text-gray-200 border border-gray-700 rounded-2xl rounded-bl-sm' 
+                  : 'bg-transparent text-gray-500 border border-dashed border-gray-800 text-sm italic rounded-xl'
+            }`}>
+              <strong className="block mb-1 opacity-80 text-xs uppercase tracking-wider">
+                {msg.sender === 'ai-message' ? 'AiVi' : msg.sender === 'user-message' ? 'Tú' : ''}
+              </strong>
+              <span className="leading-relaxed">
+                {msg.text.replace(/\[TRIGGER_CAMERA_[a-zA-Z0-9-]+\]/g, '')}
+              </span>
             </div>
           </div>
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+      {/* Controles */}
+      <div className="flex flex-wrap gap-3 bg-black/40 p-5 rounded-2xl border border-gray-800 shadow-md items-stretch">
         <input 
-          type="text" value={inputText} onChange={(e) => setInputText(e.target.value)}
+          type="text" 
+          value={inputText} 
+          onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSendText()}
           placeholder="Escribe o habla con AiVi..."
-          style={{ flex: 1, padding: '12px', borderRadius: '4px', border: '1px solid #ccc', minWidth: '200px' }}
+          className="flex-1 p-3 rounded-xl bg-gray-900/80 border border-gray-700 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-aivi-gold/60 focus:ring-1 focus:ring-aivi-gold/30 min-w-[200px] transition-all"
         />
-        <button onClick={handleSendText} disabled={!isConnected} style={{ padding: '12px 20px' }}>Enviar</button>
+        <button 
+          onClick={handleSendText} 
+          disabled={!isConnected} 
+          className="px-6 py-3 bg-gray-800 text-gray-300 font-semibold rounded-xl hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-gray-700"
+        >
+          Enviar
+        </button>
         
         <button 
           onClick={toggleRecording} 
           disabled={!isConnected || isAutoMode} 
-          style={{ padding: '12px 20px', backgroundColor: isRecording ? '#dc3545' : '#6c757d', color: 'white', border: 'none', borderRadius: '4px', opacity: isAutoMode ? 0.5 : 1 }}
+          className={`px-6 py-3 font-semibold rounded-xl transition-colors border flex items-center gap-2 ${
+            isRecording 
+              ? 'bg-red-900/40 text-red-400 border-red-800 hover:bg-red-900/60' 
+              : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700'
+          } disabled:opacity-30 disabled:cursor-not-allowed`}
         >
           {isRecording ? "⏹️ Detener" : "🎙️ Hablar"}
         </button>
@@ -601,39 +614,66 @@ if (response.ok) {
         <button 
           onClick={toggleAutoMode} 
           disabled={!isConnected || isRecording} 
-          style={{ padding: '12px 20px', backgroundColor: isAutoMode ? '#198754' : '#0dcaf0', color: isAutoMode ? 'white' : 'black', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}
+          className={`px-6 py-3 font-semibold rounded-xl transition-all border flex items-center gap-2 ${
+            isAutoMode 
+              ? 'bg-green-900/30 text-green-400 border-green-800 shadow-[0_0_15px_rgba(25,135,84,0.2)]' 
+              : 'bg-aivi-gold/10 text-aivi-gold border-aivi-gold/30 hover:bg-aivi-gold/20'
+          } disabled:opacity-30 disabled:cursor-not-allowed`}
         >
           {isAutoMode ? "🎧 Manos Libres ON" : "🎧 Manos Libres OFF"}
         </button>
       </div>
 
+      {/* VAD Status Panel */}
       {isAutoMode && (
-        <div style={{ marginBottom: '20px', padding: '10px', backgroundColor: '#e2e3e5', borderRadius: '8px', textAlign: 'center', fontWeight: 'bold' }}>
-          Estado IA: <span style={{ color: isSpeakingRef.current ? '#198754' : '#6c757d' }}>{vadStatus}</span>
+        <div className="bg-black/60 border border-gray-800 p-3 rounded-xl text-center text-sm font-medium tracking-wide">
+          <span className="text-gray-400">Estado IA: </span>
+          <span className={`${isSpeakingRef.current ? 'text-green-400 animate-pulse' : 'text-aivi-gold'}`}>
+            {vadStatus}
+          </span>
         </div>
       )}
 
-      <div style={{ borderTop: '2px solid #ccc', paddingTop: '15px' }}>
-        <h3>📦 Estado de mis Medicamentos</h3>
-        <button onClick={fetchMyOrders} style={{ padding: '5px 10px', marginBottom: '10px' }}>Actualizar Consultas</button>
+      {/* Medicamentos y Autorización */}
+      <div className="mt-4 bg-black/40 border border-gray-800 rounded-2xl p-6 flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-800 pb-4">
+          <h3 className="text-xl font-bold text-gray-200">📦 Estado de mis Medicamentos</h3>
+          <button 
+            onClick={fetchMyOrders} 
+            className="px-4 py-2 text-sm bg-gray-800 text-gray-300 border border-gray-700 rounded-lg hover:bg-gray-700 hover:text-white transition-colors"
+          >
+            ↻ Actualizar Consultas
+          </button>
+        </div>
         
-        {myOrders.length === 0 ? <p>No tienes medicamentos registrados.</p> : (
-          <ul style={{ listStyleType: 'none', padding: 0 }}>
+        {myOrders.length === 0 ? (
+          <p className="text-gray-500 italic text-center py-4">No tienes medicamentos registrados actualmente.</p>
+        ) : (
+          <ul className="flex flex-col gap-4">
             {myOrders.map((order, idx) => (
-              <li key={idx} style={{ padding: '10px', border: '1px solid #eee', marginBottom: '5px', borderRadius: '4px', backgroundColor: '#fff' }}>
-                <strong>Medicamentos:</strong> 
-                <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+              <li key={idx} className="p-5 border border-gray-800 rounded-xl bg-gray-900/50 shadow-inner">
+                <strong className="text-aivi-gold mb-2 block">Lista de Medicamentos:</strong> 
+                <ul className="mb-4 pl-6 list-disc text-gray-300 space-y-1 marker:text-gray-600">
                   {order.prescription_data?.medications?.map((m: any, i: number) => (
-                    <li key={i}>{m.name} - {m.dose} ({m.frequency})</li>
+                    <li key={i}><span className="text-gray-100 font-medium">{m.name}</span> - {m.dose} <span className="text-gray-500 text-sm">({m.frequency})</span></li>
                   ))}
                 </ul>
-                <strong>Estado de Despacho:</strong> <span style={{ color: order.delivery_status === 'pending' ? 'orange' : 'blue', fontWeight: 'bold' }}>{order.delivery_status.toUpperCase()}</span>
+                <div className="flex items-center gap-2 mt-2 pt-4 border-t border-gray-800">
+                  <strong className="text-gray-400">Estado de Despacho:</strong> 
+                  <span className={`font-bold px-3 py-1 rounded text-xs tracking-wider uppercase border ${
+                    order.delivery_status === 'pending' 
+                      ? 'bg-yellow-900/20 text-yellow-500 border-yellow-800/50' 
+                      : 'bg-blue-900/20 text-blue-400 border-blue-800/50'
+                  }`}>
+                    {order.delivery_status}
+                  </span>
+                </div>
                 
                 {order.delivery_status === 'pending' && !isCameraActive && (
-                  <div style={{ marginTop: '10px' }}>
+                  <div className="mt-5">
                     <button 
                       onClick={() => startLivenessCheck(order.id)} 
-                      style={{ padding: '8px', backgroundColor: '#0dcaf0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                      className="px-5 py-2.5 bg-aivi-gold/10 text-aivi-gold border border-aivi-gold/30 rounded-xl hover:bg-aivi-gold/20 hover:border-aivi-gold/50 transition-all font-bold text-sm flex items-center gap-2"
                     >
                       📸 Autorizar con Rostro
                     </button>
@@ -644,23 +684,30 @@ if (response.ok) {
           </ul>
         )}
 
-        <div style={{ 
-          display: isCameraActive ? 'block' : 'none', 
-          marginTop: '20px', border: '2px dashed #0dcaf0', padding: '15px', 
-          textAlign: 'center', backgroundColor: '#f8f9fa', borderRadius: '8px' 
-        }}>
-          <h4>Autorizando Orden</h4>
-          <p>Mire a la cámara y abra la boca para confirmar su identidad.</p>
-          <video ref={videoRef} autoPlay playsInline style={{ width: '100%', maxWidth: '300px', margin: '0 auto', transform: 'scaleX(-1)' }}></video>
-          <br/>
-          <button onClick={stopCamera} style={{ marginTop: '10px', padding: '8px 20px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+        {/* Cámara de Autorización (Farmacia) */}
+        <div className={`mt-4 border-2 border-dashed border-aivi-gold/40 p-6 flex-col items-center text-center bg-black/60 rounded-2xl shadow-xl ${isCameraActive ? 'flex' : 'hidden'}`}>
+          <h4 className="text-lg font-bold text-aivi-gold mb-1">Autorizando Orden</h4>
+          <p className="text-gray-400 text-sm mb-5">Mire a la cámara y abra la boca para confirmar su identidad de forma segura.</p>
+          <video 
+            ref={videoRef} 
+            autoPlay 
+            playsInline 
+            className="w-full max-w-[300px] mx-auto scale-x-[-1] rounded-xl border border-gray-700 shadow-lg object-cover mb-4"
+          ></video>
+          <button 
+            onClick={stopCamera} 
+            className="px-6 py-2.5 bg-red-900/30 text-red-400 border border-red-800/50 rounded-xl hover:bg-red-900/50 transition-colors font-medium"
+          >
             Cancelar Escaneo
           </button>
         </div>
       </div>
 
-      <button onClick={disconnectWebSocket} style={{ marginTop: '20px', padding: '10px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', width: '100%' }}>
-        Cerrar Sesión
+      <button 
+        onClick={disconnectWebSocket} 
+        className="mt-6 px-6 py-4 bg-red-900/10 text-red-500 border border-red-900/30 rounded-2xl hover:bg-red-900/20 hover:border-red-900/50 transition-all font-bold text-lg w-full"
+      >
+        Cerrar Sesión Segura
       </button>
     </div>
   );
