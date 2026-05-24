@@ -3,15 +3,14 @@ frontend:
   phases:
     preBuild:
       commands:
+        - cd frontend
         - npm install -g pnpm
         - pnpm install
     build:
       commands:
+        - cd frontend
         - pnpm run build
   artifacts:
-    baseDirectory: dist
+    baseDirectory: frontend/dist
     files:
       - '**/*'
-  cache:
-    paths:
-      - node_modules/**/*
